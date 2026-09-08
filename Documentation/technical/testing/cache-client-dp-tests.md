@@ -65,7 +65,10 @@ These drive real, nonzero noise and real clipping.
 |------|----------------------|
 | `test_noise_scales_with_clipping_norm[...]` | For all three mechanisms, quadrupling `clipping_norm` at a fixed multiplier quadruples the noise standard deviation. Weights sit well inside the bound so clipping is a no-op and the measured difference is noise alone |
 | `test_noise_scales_with_noise_multiplier[...]` | For all three mechanisms, quadrupling `noise_multiplier` at a fixed clipping norm quadruples the noise. Without this, an implementation that used `clipping_norm` alone would still pass the test above |
-| `test_noise_is_zero_when_clipping_norm_is_zero[...]` | A non-positive `clipping_norm` disables clipping, leaving no sensitivity to calibrate against, so the scaled noise is zero and the mechanism is an explicit no-op |
+| `test_non_positive_clipping_norm_is_rejected[...]` | A `clipping_norm` of zero or below is rejected by `apply_dp_mechanism` for all three mechanisms, rather than silently disabling clipping or producing a no-op |
+| `test_resolve_dp_config_rejects_non_positive_clipping_norm[...]` | The same rejection happens at manifest resolution, so the bad value is caught before any training output reaches a mechanism |
+| `test_laplace_requires_an_explicit_scale` | `post_training_laplace` without its own `laplace_scale` raises rather than inheriting `noise_multiplier` |
+| `test_resolve_dp_config_requires_laplace_scale` | The same requirement is enforced when the manifest is resolved |
 | `test_global_clip_scope_bounds_the_combined_norm` | Sixteen tensors each driven past the bound: `per_layer` leaves a combined L2 norm of `clipping_norm * 4` (that is, `sqrt(16)`), `global` leaves exactly `clipping_norm` |
 | `test_resolve_dp_config_defaults_clip_scope_to_global` | A manifest with no `clip_scope` resolves to `global` |
 

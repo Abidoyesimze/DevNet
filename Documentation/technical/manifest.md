@@ -149,7 +149,14 @@ Resolution rules in the current service:
 - if DP is enabled and no mechanism is specified, the client defaults to `post_training_gaussian`;
 - the current client service supports `post_training_gaussian`, `post_training_laplace`, and `update_gaussian`;
 - `clip_scope` defaults to `global`, the only scope that bounds the combined update at `clipping_norm`;
-- the noise applied is `noise_multiplier * clipping_norm`, so changing `clipping_norm` changes the noise with it.
+- the noise applied is `noise_multiplier * clipping_norm`, so changing `clipping_norm` changes the noise with it;
+- `clipping_norm` must be greater than zero whenever DP is enabled. A non-positive value is rejected rather than treated as "no clipping", because noise applied without a sensitivity bound behind it is not a privacy guarantee;
+- `post_training_laplace` requires its own `laplace_scale`. It does not fall back to `noise_multiplier`, which is a differently calibrated quantity measured in different units.
+
+**Privacy is off unless you turn it on.** A manifest with no `dp` block, or
+with `dp.enabled: false`, uploads raw trained weights with no clipping and no
+noise. This is the default. Nothing warns about it at runtime, so a model owner
+who wants DP has to ask for it explicitly.
 
 ## Why The Nested `dp` Block Matters
 
