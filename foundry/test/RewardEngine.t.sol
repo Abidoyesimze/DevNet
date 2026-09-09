@@ -429,6 +429,17 @@ contract RewardEngineTest is Test {
 
         assertEq(uint256(tc.GIstate()), uint256(GIstates.GIended));
 
+        // Each participant calls claimReward(gi) to credit their claimable balance.
+        vm.prank(client1);  ta.claimReward(1);
+        vm.prank(client2);  ta.claimReward(1);
+        vm.prank(client3);  ta.claimReward(1);
+        vm.prank(auditor1); ta.claimReward(1);
+        vm.prank(auditor2); ta.claimReward(1);
+        vm.prank(auditor3); ta.claimReward(1);
+        vm.prank(agg1);     ta.claimReward(1);
+        vm.prank(agg2);     ta.claimReward(1);
+        vm.prank(agg3);     ta.claimReward(1);
+
         // Default split: 60/20/15/5 of 10,000 = 6000/2000/1500/500.
         // All three clients scored identically (80, approved) -> equal
         // three-way split of the 6000 client pool.
@@ -464,6 +475,16 @@ contract RewardEngineTest is Test {
 
         vm.prank(modelOwner);
         tc.endGI(1);
+
+        vm.prank(client1);  ta.claimReward(1);
+        vm.prank(client2);  ta.claimReward(1);
+        vm.prank(client3);  ta.claimReward(1);
+        vm.prank(auditor1); ta.claimReward(1);
+        vm.prank(auditor2); ta.claimReward(1);
+        vm.prank(auditor3); ta.claimReward(1);
+        vm.prank(agg1);     ta.claimReward(1);
+        vm.prank(agg2);     ta.claimReward(1);
+        vm.prank(agg3);     ta.claimReward(1);
 
         uint256 totalCredited = ta.claimable(client1) +
             ta.claimable(client2) +
@@ -510,6 +531,9 @@ contract RewardEngineTest is Test {
         vm.prank(modelOwner);
         tc.endGI(1);
 
+        vm.prank(client1);
+        ta.claimReward(1);
+
         uint256 owed = ta.claimable(client1);
         assertGt(owed, 0);
         uint256 balanceBefore = token.balanceOf(client1);
@@ -536,6 +560,9 @@ contract RewardEngineTest is Test {
         tc.endGI(1);
 
         vm.prank(client1);
+        ta.claimReward(1);
+
+        vm.prank(client1);
         ta.claimRewards();
 
         vm.prank(client1);
@@ -548,11 +575,53 @@ contract RewardEngineTest is Test {
         vm.prank(modelOwner);
         tc.endGI(1);
 
+        vm.prank(client1);
+        ta.claimReward(1);
+        vm.prank(client2);
+        ta.claimReward(1);
+
         uint256 client2Owed = ta.claimable(client2);
 
         vm.prank(client1);
         ta.claimRewards();
 
         assertEq(ta.claimable(client2), client2Owed, "claiming client1's balance must not touch client2's");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // claimReward: new claim-pull reverts (BL-10)
+    // ─────────────────────────────────────────────────────────────────────
+
+    function test_claimReward_revertsIfNotSettled() public {
+        _deployPlatform();
+        _deployTaskPair();
+
+        vm.prank(client1);
+        vm.expectRevert(abi.encodeWithSignature("TA_RewardsNotSettled()"));
+        ta.claimReward(1);
+    }
+
+    function test_claimReward_revertsOnDoubleClaim() public {
+        _runFullHonestGI(1_000 ether);
+        vm.prank(modelOwner);
+        tc.endGI(1);
+
+        vm.prank(client1);
+        ta.claimReward(1);
+
+        vm.prank(client1);
+        vm.expectRevert(abi.encodeWithSignature("TA_RewardAlreadyClaimed()"));
+        ta.claimReward(1);
+    }
+
+    function test_claimReward_revertsIfNoRewardEarned() public {
+        _runFullHonestGI(1_000 ether);
+        vm.prank(modelOwner);
+        tc.endGI(1);
+
+        address nobody = makeAddr("nobody");
+        vm.prank(nobody);
+        vm.expectRevert(abi.encodeWithSignature("TA_NoRewardEarned()"));
+        ta.claimReward(1);
     }
 }
