@@ -99,6 +99,14 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     }
 
     IERC20 public dinToken;
+    // Dispute bonds are DIN-denominated as a slashing-pattern security deposit — the
+    // challenger's own skin-in-the-game, forfeited via the same 50/50 burn/treasury
+    // split as DinValidatorStake.slash() (MECHANISM_DESIGN.md §4 item 1, §9 item 7).
+    // This is not a network-fee payment: item 4's ETH resolution governs per-GI
+    // validator service fees paid between economic actors, not a challenger's own
+    // stake returned or burned based on correctness. When DinTreasury lands
+    // (task_210726_5), the resolveDispute forfeiture TODO already cites item 1's
+    // burn/treasury destination — no ETH-burn path is needed.
     uint256 public disputeBond = 100 * 1e18; // placeholder default, DAO-settable
     uint64 public disputeWindow = 1 days; // placeholder default, DAO-settable
     address public treasuryAddress;
