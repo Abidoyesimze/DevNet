@@ -64,3 +64,37 @@ Also confirmed: both existing slash call sites (`DINTaskAuditor.slashAuditors`, 
 | S6 | Spec only (this doc) | No code; blocked behind Robbert's governable-storage work |
 
 Invariant tests (Part 4b) exercise S1/S2's existing `slash()` path only — S3–S6 have no slash call sites yet to test against.
+
+## Bond denomination (§9 item 7 — now resolved)
+
+`disputeBond` (`DINTaskCoordinator.sol:102`) is DIN-denominated. This closes
+§9 item 7 ("Dispute bond size & window length") on the denomination question.
+
+Dispute bonds are a **slashing-pattern security deposit**, not a network-fee
+payment. The distinction matters for denomination:
+
+- **§9 item 4** ("Fee denomination") resolves validator network fees — the
+  per-GI service fee a model owner pays a validator — to ETH. That resolution
+  governs payments between economic actors for a service and does not apply here.
+- **§9 item 1** ("Slashed-stake destination") resolves the 50/50 burn/treasury
+  split for DIN slashing, and is already implemented in `DinValidatorStake.slash()`
+  via `IBurnableToken.burn` + `safeTransfer` to `slashTreasury`. A dispute bond
+  is the challenger's own stake, forfeited or returned based on whether they were
+  right — structurally identical to a slashing instrument, not a fee.
+
+Keeping DIN for dispute bonds means:
+- Bond forfeiture routes directly through the existing `IBurnableToken.burn`
+  machinery (50% burn / 50% treasury) once `DinTreasury` lands — no separate
+  ETH-burn-or-treasury path needs inventing (ETH cannot burn in this protocol;
+  its "burn" share routes to treasury, which would silently weaken the
+  deflationary intent item 1 established).
+- Challengers are validators (`isValidatorActive` gate at `openDispute`) who
+  have already acquired DIN via `depositAndMint` for their stake requirement —
+  the same on-ramp covers any bond top-up with no new tooling.
+- Bond denomination stays consistent with item 1's DIN resolution across all
+  slashing-pattern instruments in the protocol.
+
+The `resolveDispute` forfeiture TODO (`DINTaskCoordinator.sol:1092`) already
+cites MECHANISM_DESIGN.md §4's burn/treasury destination explicitly — the
+scaffold's author already treated this as a slashing-pattern instrument before
+this item was filed.
