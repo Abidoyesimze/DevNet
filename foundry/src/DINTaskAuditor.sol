@@ -59,12 +59,43 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
     address public treasuryAddress;
 
     /// @notice Per-address claimable reward balance across all GIs.
-    /// @dev Pull-payment only -- settleRewards credits this, claimRewards
-    ///      is the only function that ever transfers out of it. No push
-    ///      transfers in settlement, matching the gas-DoS class flagged in
-    ///      the foundry/src security review (PR #22/#30) for unbounded
-    ///      loops elsewhere in these contracts.
+    /// @dev Pull-payment only -- claimReward(gi) credits this per GI,
+    ///      claimRewards() is the only function that ever transfers out of it.
     mapping(address => uint256) public claimable;
+
+    // ── Claim-pull reward settlement (BL-10) ─────────────────────────────────
+    // settleRewards stores an O(1) snapshot of pool amounts at endGI time.
+    // Per-participant shares are computed lazily in claimReward(gi).
+    // Totals (totalApprovedScore, totalAuditWeight) are tracked incrementally
+    // during the GI so settleRewards itself runs no participant loops.
+
+    /// @notice Per-GI snapshot of pool amounts stored at settleRewards time.
+    struct GIRewardSnapshot {
+        uint256 clientPool;
+        uint256 auditorPool;
+        uint256 aggregatorPool;
+        uint256 aggregatorShare; // aggregatorPool / rewardable-aggregator count
+        bool settled;
+    }
+    mapping(uint256 => GIRewardSnapshot) public giRewardSnapshot;
+
+    /// @notice Running sum of finalMedianScore for approved==true submissions,
+    ///         incremented in finalizeEvaluation when a model is first approved.
+    mapping(uint256 => uint256) public giTotalApprovedScore;
+
+    /// @notice Running total hasAuditedLM count across all auditors for a GI,
+    ///         incremented in revealAuditScore.
+    mapping(uint256 => uint256) public giTotalAuditWeight;
+
+    /// @notice Per-auditor hasAuditedLM count for a GI, incremented in revealAuditScore.
+    mapping(uint256 => mapping(address => uint256)) public auditorGIWeight;
+
+    /// @notice Whether an address is a rewardable aggregator for a GI,
+    ///         set in settleRewards from the coordinator-supplied list.
+    mapping(uint256 => mapping(address => bool)) public isRewardableAggregator;
+
+    /// @notice Whether a participant has already called claimReward for a GI.
+    mapping(uint256 => mapping(address => bool)) public rewardClaimed;
 
     uint MAX_LM_SUBMISSIONS = 10000;
     uint256 public constant MAX_REGISTERED_AUDITORS = 300;
@@ -401,38 +432,23 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
         emit RewardDeposited(gi, msg.sender, amount);
     }
 
-    /// @notice Computes and credits per-GI reward shares across clients,
-    ///         auditors, and aggregators, plus the treasury's cut.
+    /// @notice Stores the per-GI reward pool snapshot at endGI time.
     /// @dev Restricted to the paired DINTaskCoordinator, called once from
-    ///      endGI() after GIstate reaches AggregatorsSlashed. Only ever
-    ///      credits the `claimable` mapping -- no transfers happen here, by
-    ///      design (see claimable's NatSpec). `rewardableAggregators` is
-    ///      supplied by the coordinator (which owns the T1/T2 batch data)
-    ///      rather than re-derived here, one entry per (aggregator,
-    ///      finalized batch) pair so an aggregator who completed both a T1
-    ///      and the T2 batch gets proportionally more weight, mirroring the
-    ///      auditor weighting below.
+    ///      endGI() after GIstate reaches AggregatorsSlashed. No participant
+    ///      loops run here — pool totals (giTotalApprovedScore,
+    ///      giTotalAuditWeight, auditorGIWeight) were tracked incrementally
+    ///      during the GI in finalizeEvaluation and revealAuditScore (BL-10).
+    ///      Per-participant shares are computed lazily in claimReward(gi).
     ///
     ///      Split basis, per task_210726_6 §3:
     ///      - Clients: proportional to finalMedianScore among approved==true
-    ///        submissions. A rejected/ineligible submission earns nothing --
-    ///        already enforced by the `approved` gate, not re-implemented
-    ///        here (median-bounded score inflation and fold-in duplicate
-    ///        discounting, where §1a's mc_marginal_gain_score is used,
-    ///        bound this basis upstream in Parts 1-2, not in this function).
-    ///      - Auditors: one weight unit per (batchId, modelIndex) they
-    ///        actually voted on (hasAuditedLM), NOT a flat per-auditor
-    ///        share -- an auditor who completed more assigned votes gets
-    ///        proportionally more. Correctness is enforced by slashAuditors
-    ///        having already run in this GI, not by re-checking anything
-    ///        here (an auditor who missed a vote already lost stake for it;
-    ///        they still earn for the votes they DID complete).
-    ///      - Aggregators: one weight unit per rewardableAggregators entry.
-    ///      - Treasury: the remainder after the other three integer-divided
-    ///        shares are subtracted, not a fourth independently-rounded
-    ///        share -- absorbs rounding dust so the four shares always sum
-    ///        to exactly giRewardPool[gi], mirroring DinFeeRouter's
-    ///        publicGoods-absorbs-dust pattern (task_210726_5).
+    ///        submissions (computed at claim time via giTotalApprovedScore).
+    ///      - Auditors: proportional to hasAuditedLM vote count stored in
+    ///        auditorGIWeight (computed at claim time via giTotalAuditWeight).
+    ///      - Aggregators: equal split; share stored here, membership marked
+    ///        via isRewardableAggregator.
+    ///      - Treasury: remainder (rounding dust absorbed here, same as
+    ///        DinFeeRouter's publicGoods-absorbs-dust pattern).
     /// @param gi GI index to settle.
     /// @param rewardableAggregators Aggregators credited for a finalized T1/T2
     ///        batch this GI, one entry per (aggregator, batch) pair.
@@ -443,95 +459,73 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
         uint256 pool = giRewardPool[gi];
 
         RewardSplit memory split = rewardSplit;
-        uint256 clientPool = (pool * split.clientBps) / BPS_DENOMINATOR;
-        uint256 auditorPool = (pool * split.auditorBps) / BPS_DENOMINATOR;
+        uint256 clientPool    = (pool * split.clientBps)      / BPS_DENOMINATOR;
+        uint256 auditorPool   = (pool * split.auditorBps)     / BPS_DENOMINATOR;
         uint256 aggregatorPool = (pool * split.aggregatorBps) / BPS_DENOMINATOR;
-        uint256 treasuryShare = pool -
-            clientPool -
-            auditorPool -
-            aggregatorPool;
+        uint256 treasuryShare = pool - clientPool - auditorPool - aggregatorPool;
 
         treasuryAccrued += treasuryShare;
 
-        _settleClientRewards(gi, clientPool);
-        _settleAuditorRewards(gi, auditorPool);
-        _settleAggregatorRewards(rewardableAggregators, aggregatorPool);
-
-        emit RewardsSettled(
-            gi,
-            clientPool,
-            auditorPool,
-            aggregatorPool,
-            treasuryShare
-        );
-    }
-
-    function _settleClientRewards(uint256 gi, uint256 clientPool) internal {
-        LMSubmission[] storage submissions = lmSubmissions[gi];
-
-        uint256 totalApprovedScore;
-        for (uint256 i = 0; i < submissions.length; i++) {
-            if (submissions[i].approved) {
-                totalApprovedScore += submissions[i].finalMedianScore;
-            }
-        }
-        if (totalApprovedScore == 0) return;
-
-        for (uint256 i = 0; i < submissions.length; i++) {
-            if (submissions[i].approved) {
-                uint256 share = (clientPool * submissions[i].finalMedianScore) /
-                    totalApprovedScore;
-                if (share > 0) {
-                    claimable[submissions[i].client] += share;
-                }
-            }
-        }
-    }
-
-    function _settleAuditorRewards(uint256 gi, uint256 auditorPool) internal {
-        AuditBatch[] storage batches = auditBatches[gi];
-
-        uint256 totalWeight;
-        for (uint256 b = 0; b < batches.length; b++) {
-            AuditBatch storage batch = batches[b];
-            for (uint256 a = 0; a < batch.auditors.length; a++) {
-                address auditor = batch.auditors[a];
-                for (uint256 m = 0; m < batch.modelIndexes.length; m++) {
-                    if (hasAuditedLM[gi][b][auditor][batch.modelIndexes[m]]) {
-                        totalWeight++;
-                    }
-                }
-            }
-        }
-        if (totalWeight == 0) return;
-
-        for (uint256 b = 0; b < batches.length; b++) {
-            AuditBatch storage batch = batches[b];
-            for (uint256 a = 0; a < batch.auditors.length; a++) {
-                address auditor = batch.auditors[a];
-                uint256 weight;
-                for (uint256 m = 0; m < batch.modelIndexes.length; m++) {
-                    if (hasAuditedLM[gi][b][auditor][batch.modelIndexes[m]]) {
-                        weight++;
-                    }
-                }
-                if (weight > 0) {
-                    claimable[auditor] += (auditorPool * weight) / totalWeight;
-                }
-            }
-        }
-    }
-
-    function _settleAggregatorRewards(
-        address[] calldata rewardableAggregators,
-        uint256 aggregatorPool
-    ) internal {
+        // Mark rewardable aggregators and store the equal per-aggregator share.
+        // This is the only loop here: aggregator count is bounded by finalized
+        // T1/T2 batches, far smaller than the client or auditor participant set.
         uint256 count = rewardableAggregators.length;
-        if (count == 0) return;
-
+        uint256 aggregatorShare = count > 0 ? aggregatorPool / count : 0;
         for (uint256 i = 0; i < count; i++) {
-            claimable[rewardableAggregators[i]] += aggregatorPool / count;
+            isRewardableAggregator[gi][rewardableAggregators[i]] = true;
         }
+
+        giRewardSnapshot[gi] = GIRewardSnapshot({
+            clientPool:     clientPool,
+            auditorPool:    auditorPool,
+            aggregatorPool: aggregatorPool,
+            aggregatorShare: aggregatorShare,
+            settled: true
+        });
+
+        emit RewardsSettled(gi, clientPool, auditorPool, aggregatorPool, treasuryShare);
+    }
+
+    /// @notice Computes and credits the caller's reward share for a settled GI.
+    /// @dev Per-participant O(1) computation from the snapshot and incremental
+    ///      totals stored during the GI. Credits claimable[msg.sender] — call
+    ///      claimRewards() afterward to transfer. One call per (gi, participant):
+    ///      rewardClaimed[gi][msg.sender] prevents double-crediting.
+    /// @param gi GI index to claim for. Must already be settled via endGI.
+    function claimReward(uint256 gi) external {
+        GIRewardSnapshot storage snap = giRewardSnapshot[gi];
+        if (!snap.settled)                 revert TA_RewardsNotSettled();
+        if (rewardClaimed[gi][msg.sender]) revert TA_RewardAlreadyClaimed();
+        rewardClaimed[gi][msg.sender] = true;
+
+        uint256 amount;
+
+        // Client share: proportional to finalMedianScore among approved submissions.
+        uint256 totalApproved = giTotalApprovedScore[gi];
+        if (clientHasSubmitted[gi][msg.sender] && totalApproved > 0) {
+            LMSubmission storage sub =
+                lmSubmissions[gi][clientSubmissionIndex[gi][msg.sender]];
+            if (sub.approved) {
+                amount += (snap.clientPool * sub.finalMedianScore) / totalApproved;
+            }
+        }
+
+        // Auditor share: proportional to per-auditor weight stored at reveal time.
+        uint256 totalWeight = giTotalAuditWeight[gi];
+        if (totalWeight > 0) {
+            uint256 weight = auditorGIWeight[gi][msg.sender];
+            if (weight > 0) {
+                amount += (snap.auditorPool * weight) / totalWeight;
+            }
+        }
+
+        // Aggregator share: equal split, membership recorded at settle time.
+        if (isRewardableAggregator[gi][msg.sender] && snap.aggregatorShare > 0) {
+            amount += snap.aggregatorShare;
+        }
+
+        if (amount == 0) revert TA_NoRewardEarned();
+        claimable[msg.sender] += amount;
     }
 
     /// @notice Claims the caller's full accumulated reward balance.
@@ -1038,6 +1032,8 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
         auditScores[gi][batchId][msg.sender][modelIndex] = score;
         LMeligibleVote[gi][batchId][msg.sender][modelIndex] = vote;
         hasAuditedLM[gi][batchId][msg.sender][modelIndex] = true;
+        auditorGIWeight[gi][msg.sender]++;
+        giTotalAuditWeight[gi]++;
 
         emit AuditScoreSubmitted(gi, batchId, msg.sender, modelIndex, score);
         emit EligibilityVoted(gi, batchId, modelIndex, msg.sender, vote);
@@ -1120,11 +1116,19 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
                     // array) when emitting deviations below.
                     uint256 median = _medianOf(votedScores, votes);
 
+                    bool wasEvaluated = sub.evaluated;
                     sub.finalMedianScore = median;
                     sub.evaluated = true;
 
                     // Approval requires (i) eligible == true and (ii) median >= passScore
                     sub.approved = (sub.eligible && median >= params.passScore);
+
+                    // Incremental total for settleRewards O(1) snapshot (BL-10).
+                    // Guard with wasEvaluated so repeated finalizeEvaluation calls
+                    // on the same model don't double-count the score.
+                    if (!wasEvaluated && sub.approved) {
+                        giTotalApprovedScore[_GI] += median;
+                    }
 
                     finalizedCount++;
 

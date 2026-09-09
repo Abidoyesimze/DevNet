@@ -892,13 +892,10 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     ///      building that list here rather than extending the cross-contract
     ///      interface to expose T1/T2 batch internals for a read only used
     ///      once, at end-of-GI.
-    ///      settleRewards only credits a `claimable` mapping -- no transfers
-    ///      happen in this call, so this stays a bounded-cost state
-    ///      transition regardless of pool size (the iteration cost of
-    ///      collecting/crediting scales with participant count, same
-    ///      already-known-and-documented class of cost as
-    ///      slashAggregators/finalizeEvaluation elsewhere in these
-    ///      contracts, not a new unbounded-loop risk this task introduces).
+    ///      settleRewards stores an O(1) snapshot — pool amounts and the
+    ///      aggregator membership/share — with no per-client or per-auditor
+    ///      loops (BL-10 fix). Per-participant shares are computed lazily
+    ///      in DINTaskAuditor.claimReward(gi) at claim time.
     ///      The next startGI call will increment GI and transition state to
     ///      GIstarted.
     /// @param _GI Current GI index.
