@@ -114,7 +114,7 @@ class DinContext:
             "maxFeePerGas": self.w3.eth.gas_price * 2, # Strategy to ensure inclusion
             "maxPriorityFeePerGas": self.w3.eth.max_priority_fee, # The "tip" to the miner/validator
             "chainId": self.w3.eth.chain_id,
-            "nonce": self.w3.eth.get_transaction_count(self.account.address),
+            "nonce": self.w3.eth.get_transaction_count(self.account.address, "pending"),
         } 
     
     def select_network(self, network: Optional[str]):
