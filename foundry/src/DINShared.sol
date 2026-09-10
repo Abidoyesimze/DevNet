@@ -304,6 +304,12 @@ error TA_NoRewardsToClaim();
 ///      never be started (or re-started) again, so the deposit could never
 ///      be settled or claimed.
 error TA_InvalidRewardGI();
+/// @dev claimReward was called for a GI whose rewards have not been settled yet.
+error TA_RewardsNotSettled();
+/// @dev Caller already claimed their reward for this GI.
+error TA_RewardAlreadyClaimed();
+/// @dev Caller earned no reward for this GI (not a participant, or scored zero).
+error TA_NoRewardEarned();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Custom errors — dispute resolution (task_210726_6 §4c, DINTaskCoordinator)
