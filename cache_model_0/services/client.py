@@ -274,6 +274,32 @@ def normalize_dp_mechanism(dp_mechanism):
     return DP_MECHANISM_ALIASES.get(normalized_mechanism, normalized_mechanism)
 
 
+def validate_clipping_norm(clipping_norm):
+    """A non-positive clipping norm disables clipping while noise still gets
+    applied, which leaves the noise with no sensitivity behind it. Reject it
+    when DP is enabled rather than treating it as a silent no-op."""
+    clipping_norm = float(clipping_norm)
+    if clipping_norm <= 0:
+        raise ValueError(
+            "clipping_norm must be greater than 0 when DP is enabled, "
+            f"got {clipping_norm}"
+        )
+    return clipping_norm
+
+
+def require_laplace_scale(params):
+    """`laplace_scale` and `noise_multiplier` carry different units and are
+    calibrated differently, so a Laplace run has to state its own scale rather
+    than inherit the Gaussian one."""
+    if "laplace_scale" not in params:
+        raise ValueError(
+            "post_training_laplace requires an explicit 'laplace_scale' "
+            "parameter; it no longer falls back to 'noise_multiplier', which "
+            "is a differently calibrated quantity"
+        )
+    return float(params["laplace_scale"])
+
+
 def resolve_dp_config(runtime=None):
     """Resolve DP configuration from the service runtime manifest.
 
@@ -328,7 +354,10 @@ def resolve_dp_config(runtime=None):
 
     parameters.setdefault("clipping_norm", 1.0)
     parameters.setdefault("noise_multiplier", 0.5)
-    parameters.setdefault("laplace_scale", parameters["noise_multiplier"])
+    parameters["clipping_norm"] = validate_clipping_norm(parameters["clipping_norm"])
+
+    if dp_mechanism == "post_training_laplace":
+        require_laplace_scale(parameters)
     # `global` is the only scope whose clip bounds the whole update at
     # `clipping_norm`. `per_layer` clips each of n tensors independently, so
     # the combined L2 norm is bounded at clipping_norm * sqrt(n), and the
@@ -355,7 +384,7 @@ def apply_dp_mechanism(trained_state_dict, dp_config, reference_state_dict=None)
 
     mechanism = dp_config["mechanism"]
     params = dp_config["parameters"]
-    clipping_norm = float(params.get("clipping_norm", 1.0))
+    clipping_norm = validate_clipping_norm(params.get("clipping_norm", 1.0))
     clip_scope = str(params.get("clip_scope", "global")).strip().lower()
 
     if clip_scope not in {"per_layer", "global"}:
@@ -365,9 +394,11 @@ def apply_dp_mechanism(trained_state_dict, dp_config, reference_state_dict=None)
     # the clipping norm. Scaling here keeps the noise tied to the clip, so
     # changing `clipping_norm` moves the privacy level with it.
     gaussian_scale = float(params.get("noise_multiplier", 0.5)) * clipping_norm
-    laplace_scale = float(
-        params.get("laplace_scale", params.get("noise_multiplier", 0.5))
-    ) * clipping_norm
+    laplace_scale = (
+        require_laplace_scale(params) * clipping_norm
+        if mechanism == "post_training_laplace"
+        else 0.0
+    )
 
     if mechanism == "post_training_gaussian":
         clipped_state_dict = clip_state_dict(trained_state_dict, clipping_norm, clip_scope)

@@ -178,6 +178,23 @@ under `per_layer` the quantity the noise is calibrated against grows with model
 depth. `per_layer` remains available for utility, but it carries no formal
 sensitivity bound and should be treated as experimental.
 
+## Configuration Validation
+
+`clipping_norm` must be greater than zero whenever DP is enabled. A
+non-positive value used to disable clipping while noise still got applied,
+which produced noise with nothing bounding the quantity it was meant to hide.
+Both `resolve_dp_config` and `apply_dp_mechanism` now reject it, so a
+hand-built config cannot bypass the manifest-level check.
+
+`post_training_laplace` requires an explicit `laplace_scale`. It previously
+defaulted to whatever `noise_multiplier` was set to, which silently produced a
+scale nobody chose, since the two parameters carry different units and are
+calibrated differently.
+
+**DP is off by default.** With no `dp` block, or `dp.enabled: false`, the
+client uploads raw trained weights. That is a deliberate devnet default, not an
+oversight, but it means the absence of configuration is the absence of privacy.
+
 ## Noise Calibration
 
 The noise scale is `noise_multiplier * clipping_norm`, not `noise_multiplier`

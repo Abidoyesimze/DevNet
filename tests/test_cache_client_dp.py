@@ -216,14 +216,73 @@ def test_noise_scales_with_clipping_norm(mechanism):
 
 
 @pytest.mark.parametrize("mechanism", DP_MECHANISMS)
-def test_noise_is_zero_when_clipping_norm_is_zero(mechanism):
+@pytest.mark.parametrize("clipping_norm", [0.0, -1.0])
+def test_non_positive_clipping_norm_is_rejected(mechanism, clipping_norm):
     """A non-positive `clipping_norm` disables clipping, which leaves no
-    sensitivity bound for the noise to be calibrated against. The scaled noise
-    is zero there, so the mechanism is a documented no-op rather than a silent
-    privacy claim over unclipped weights."""
+    sensitivity for the noise to be calibrated against. Running the mechanism
+    anyway produces either unbounded weights with noise on top or a silent
+    no-op, depending on the version, and neither is a privacy guarantee. It is
+    rejected rather than interpreted."""
     client = load_client_module()
 
-    assert measure_noise_std(client, mechanism, clipping_norm=0.0) == 0.0
+    with pytest.raises(ValueError, match="clipping_norm"):
+        measure_noise_std(client, mechanism, clipping_norm=clipping_norm)
+
+
+@pytest.mark.parametrize("clipping_norm", [0.0, -1.0])
+def test_resolve_dp_config_rejects_non_positive_clipping_norm(clipping_norm):
+    """The same rejection happens when the manifest is resolved, so a bad
+    clipping norm is caught before any training output reaches a mechanism."""
+    client = load_client_module()
+    runtime = DummyRuntime(
+        {
+            "dp": {
+                "enabled": True,
+                "mode": "afterTraining",
+                "mechanism": "update_gaussian",
+                "parameters": {"clipping_norm": clipping_norm},
+            },
+        }
+    )
+
+    with pytest.raises(ValueError, match="clipping_norm"):
+        client.resolve_dp_config(runtime=runtime)
+
+
+def test_laplace_requires_an_explicit_scale():
+    """`laplace_scale` used to fall back to `noise_multiplier`. The two carry
+    different units and are calibrated differently, so inheriting one for the
+    other silently produced a scale nobody chose."""
+    client = load_client_module()
+    trained_state_dict = build_small_state_dict()
+    dp_config = {
+        "enabled": True,
+        "mode": "afterTraining",
+        "mechanism": "post_training_laplace",
+        "parameters": {"clipping_norm": 1.0, "noise_multiplier": 0.25},
+    }
+
+    with pytest.raises(ValueError, match="laplace_scale"):
+        client.apply_dp_mechanism(trained_state_dict, dp_config)
+
+
+def test_resolve_dp_config_requires_laplace_scale():
+    """A Laplace manifest without its own scale is rejected at resolution
+    rather than silently borrowing the Gaussian multiplier."""
+    client = load_client_module()
+    runtime = DummyRuntime(
+        {
+            "dp": {
+                "enabled": True,
+                "mode": "afterTraining",
+                "mechanism": "post_training_laplace",
+                "parameters": {"clipping_norm": 1.0, "noise_multiplier": 0.25},
+            },
+        }
+    )
+
+    with pytest.raises(ValueError, match="laplace_scale"):
+        client.resolve_dp_config(runtime=runtime)
 
 
 def test_global_clip_scope_bounds_the_combined_norm():
