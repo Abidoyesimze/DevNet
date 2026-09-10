@@ -69,6 +69,24 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         public t2Submitted;
     mapping(uint => mapping(uint => mapping(bytes32 => uint))) public t2Votes;
 
+    /// @notice Per-aggregator count of finalized T1/T2 batches they were
+    ///         assigned to in a GI, one increment per (aggregator,
+    ///         finalized-batch) pair. Preserves the reward weighting
+    ///         _collectFinalizedBatchAggregators used to express by emitting
+    ///         a duplicate array entry per pair (task_210726_6 §3): an
+    ///         aggregator assigned to a finalized batch is rewardable for it
+    ///         regardless of whether they personally matched consensus,
+    ///         since a mismatch already cost them stake via slashAggregators.
+    ///         Accumulated incrementally in finalizeT1Aggregation /
+    ///         finalizeT2Aggregation's existing per-batch loop (BL-10, #125)
+    ///         and read at claim time by DINTaskAuditor.claimReward.
+    mapping(uint256 => mapping(address => uint256)) public aggregatorWeight;
+
+    /// @notice Sum of aggregatorWeight across all aggregators for a GI --
+    ///         the settlement denominator for aggregator reward shares.
+    ///         Snapshotted into DINTaskAuditor at settleRewards time (#125).
+    mapping(uint256 => uint256) public totalAggregatorWeight;
+
     // ─────────────────────────────────────────────────────────────────────
     // Dispute resolution scaffold (task_210726_6 §4c, issue #38, S4)
     //
@@ -673,6 +691,16 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
                         winningCID = cid;
                     }
                 }
+
+                // BL-10 (#125): one settlement-weight unit per assigned
+                // aggregator in this batch, unconditional on consensus
+                // match -- same basis _collectFinalizedBatchAggregators
+                // used. Safe to write unconditionally here because the
+                // whole call reverts atomically (TC_NoSubmissions /
+                // TC_InsufficientSubmissions below) if any batch fails to
+                // finalize, so no weight persists for a non-finalized batch.
+                aggregatorWeight[_GI][aggregator]++;
+                totalAggregatorWeight[_GI]++;
             }
 
             if (winningCID == bytes32(0)) revert TC_NoSubmissions();
@@ -757,6 +785,14 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
                         winningCID = cid;
                     }
                 }
+
+                // BL-10 (#125): see the matching comment in
+                // finalizeT1Aggregation -- an aggregator assigned to both a
+                // finalized T1 batch and the finalized T2 batch accrues
+                // weight from each, exactly as the pre-#125 duplicate
+                // array entry did.
+                aggregatorWeight[_GI][aggregator]++;
+                totalAggregatorWeight[_GI]++;
             }
 
             if (winningCID == bytes32(0)) revert TC_NoSubmissions();
@@ -894,80 +930,27 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     ///      DINTaskAuditor.settleRewards (task_210726_6 §3) -- that contract
     ///      owns the client/auditor data (lmSubmissions, audit batches) this
     ///      contract doesn't have, and owns the giRewardPool/claimable
-    ///      accounting so all three roles claim from one place. This
-    ///      contract owns the T1/T2 aggregator batch data settleRewards
-    ///      needs but doesn't have, hence _collectFinalizedBatchAggregators
-    ///      building that list here rather than extending the cross-contract
-    ///      interface to expose T1/T2 batch internals for a read only used
-    ///      once, at end-of-GI.
-    ///      settleRewards stores an O(1) snapshot — pool amounts and the
-    ///      aggregator membership/share — with no per-client or per-auditor
-    ///      loops (BL-10 fix). Per-participant shares are computed lazily
-    ///      in DINTaskAuditor.claimReward(gi) at claim time.
+    ///      accounting so all three roles claim from one place.
+    ///
+    ///      This contract owns the T1/T2 aggregator batch data. Rather than
+    ///      pass a per-(aggregator, finalized-batch) address list across the
+    ///      interface (the pre-#125 shape, whose length was the settlement
+    ///      divisor), it now passes only the scalar totalAggregatorWeight[_GI]
+    ///      -- accumulated incrementally in finalizeT1Aggregation /
+    ///      finalizeT2Aggregation. settleRewards snapshots it; claimReward
+    ///      reads each aggregator's own aggregatorWeight[_GI][addr] from this
+    ///      contract at claim time. No participant loop runs in either
+    ///      settleRewards or endGI (BL-10).
+    ///
     ///      The next startGI call will increment GI and transition state to
     ///      GIstarted.
     /// @param _GI Current GI index.
     function endGI(uint _GI) external onlyOwner onlyCurrentGI(_GI) {
         if (GIstate != GIstates.AggregatorsSlashed) revert TC_NotReadyToEndGI();
 
-        address[]
-            memory rewardableAggregators = _collectFinalizedBatchAggregators(
-                _GI
-            );
-        dinTaskAuditorContract.settleRewards(_GI, rewardableAggregators);
+        dinTaskAuditorContract.settleRewards(_GI, totalAggregatorWeight[_GI]);
 
         GIstate = GIstates.GIended;
-    }
-
-    /// @notice Builds the list of aggregators credited for a finalized T1/T2
-    ///         batch this GI, one entry per (aggregator, finalized batch) pair.
-    /// @dev "Per finalized T1/T2 batch" (task_210726_6 §3): an aggregator who
-    ///      completed both a T1 batch and the T2 batch appears twice, earning
-    ///      proportionally more weight in DINTaskAuditor.settleRewards.
-    ///      Correctness (did they submit the matching CID) is enforced by
-    ///      slashAggregators having already run this GI, not re-checked here
-    ///      -- mirrors the "correctness enforced by slashing, not reward
-    ///      weighting" principle task_210726_6 §3 states explicitly for
-    ///      auditors; an aggregator assigned to a finalized batch is
-    ///      rewardable for it regardless of whether they personally matched
-    ///      consensus, since a mismatch already cost them stake.
-    /// @param _GI GI index to collect for.
-    /// @return Flat address list, ordered T1 batches then the T2 batch.
-    function _collectFinalizedBatchAggregators(
-        uint _GI
-    ) internal view returns (address[] memory) {
-        Tier1Batch[] storage t1batches = tier1Batches[_GI];
-        Tier2Batch[] storage t2batches = tier2Batches[_GI];
-
-        uint256 count;
-        for (uint i = 0; i < t1batches.length; i++) {
-            if (t1batches[i].finalized)
-                count += t1batches[i].aggregators.length;
-        }
-        for (uint i = 0; i < t2batches.length; i++) {
-            if (t2batches[i].finalized)
-                count += t2batches[i].aggregators.length;
-        }
-
-        address[] memory result = new address[](count);
-        uint256 ptr;
-        for (uint i = 0; i < t1batches.length; i++) {
-            if (t1batches[i].finalized) {
-                address[] storage aggs = t1batches[i].aggregators;
-                for (uint j = 0; j < aggs.length; j++) {
-                    result[ptr++] = aggs[j];
-                }
-            }
-        }
-        for (uint i = 0; i < t2batches.length; i++) {
-            if (t2batches[i].finalized) {
-                address[] storage aggs = t2batches[i].aggregators;
-                for (uint j = 0; j < aggs.length; j++) {
-                    result[ptr++] = aggs[j];
-                }
-            }
-        }
-        return result;
     }
 
     // ─────────────────────────────────────────────────────────────────────

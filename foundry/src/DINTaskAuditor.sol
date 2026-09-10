@@ -78,7 +78,10 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
         uint256 clientPool;
         uint256 auditorPool;
         uint256 aggregatorPool;
-        uint256 aggregatorShare; // aggregatorPool / rewardable-aggregator count
+        // Sum of aggregatorWeight over all aggregators for this GI, supplied
+        // by the coordinator at settle time -- the divisor for each
+        // aggregator's weighted share in claimReward (BL-10, #125).
+        uint256 aggregatorTotalWeight;
         bool settled;
     }
     mapping(uint256 => GIRewardSnapshot) public giRewardSnapshot;
@@ -93,10 +96,6 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
 
     /// @notice Per-auditor hasAuditedLM count for a GI, incremented in revealAuditScore.
     mapping(uint256 => mapping(address => uint256)) public auditorGIWeight;
-
-    /// @notice Whether an address is a rewardable aggregator for a GI,
-    ///         set in settleRewards from the coordinator-supplied list.
-    mapping(uint256 => mapping(address => bool)) public isRewardableAggregator;
 
     /// @notice Whether a participant has already called claimReward for a GI.
     mapping(uint256 => mapping(address => bool)) public rewardClaimed;
@@ -473,16 +472,26 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
     ///        submissions (computed at claim time via giTotalApprovedScore).
     ///      - Auditors: proportional to hasAuditedLM vote count stored in
     ///        auditorGIWeight (computed at claim time via giTotalAuditWeight).
-    ///      - Aggregators: equal split; share stored here, membership marked
-    ///        via isRewardableAggregator.
+    ///      - Aggregators: proportional to per-(aggregator, finalized-batch)
+    ///        weight tracked in DINTaskCoordinator.aggregatorWeight; only the
+    ///        scalar total is snapshotted here, each aggregator's own weight
+    ///        is read cross-contract at claim time. An aggregator credited
+    ///        for both a T1 and the T2 batch earns proportionally more,
+    ///        matching the pre-#125 duplicate-array-entry weighting
+    ///        (task_210726_6 §3) that the flat per-address split dropped.
     ///      - Treasury: remainder (rounding dust absorbed here, same as
     ///        DinFeeRouter's publicGoods-absorbs-dust pattern).
+    ///
+    ///      This function runs no loops at all (BL-10): the aggregator array
+    ///      it used to iterate is replaced by the coordinator-supplied
+    ///      scalar aggregatorTotalWeight.
     /// @param gi GI index to settle.
-    /// @param rewardableAggregators Aggregators credited for a finalized T1/T2
-    ///        batch this GI, one entry per (aggregator, batch) pair.
+    /// @param aggregatorTotalWeight Sum of DINTaskCoordinator.aggregatorWeight
+    ///        over every aggregator for this GI -- the divisor for each
+    ///        aggregator's weighted share.
     function settleRewards(
         uint256 gi,
-        address[] calldata rewardableAggregators
+        uint256 aggregatorTotalWeight
     ) external onlyTaskCoordinator onlyCurrentGI(gi) {
         uint256 pool = giRewardPool[gi];
 
@@ -494,21 +503,12 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
 
         treasuryAccrued += treasuryShare;
 
-        // Mark rewardable aggregators and store the equal per-aggregator share.
-        // This is the only loop here: aggregator count is bounded by finalized
-        // T1/T2 batches, far smaller than the client or auditor participant set.
-        uint256 count = rewardableAggregators.length;
-        uint256 aggregatorShare = count > 0 ? aggregatorPool / count : 0;
-        for (uint256 i = 0; i < count; i++) {
-            isRewardableAggregator[gi][rewardableAggregators[i]] = true;
-        }
-
         giRewardSnapshot[gi] = GIRewardSnapshot({
-            clientPool:     clientPool,
-            auditorPool:    auditorPool,
-            aggregatorPool: aggregatorPool,
-            aggregatorShare: aggregatorShare,
-            settled: true
+            clientPool:            clientPool,
+            auditorPool:           auditorPool,
+            aggregatorPool:        aggregatorPool,
+            aggregatorTotalWeight: aggregatorTotalWeight,
+            settled:               true
         });
 
         emit RewardsSettled(gi, clientPool, auditorPool, aggregatorPool, treasuryShare);
@@ -547,9 +547,23 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
             }
         }
 
-        // Aggregator share: equal split, membership recorded at settle time.
-        if (isRewardableAggregator[gi][msg.sender] && snap.aggregatorShare > 0) {
-            amount += snap.aggregatorShare;
+        // Aggregator share: proportional to per-(aggregator, finalized-batch)
+        // weight held in the coordinator. Read cross-contract here (one O(1)
+        // SLOAD via call) rather than snapshotting every aggregator's weight
+        // at settle time, which would reintroduce the settlement loop BL-10
+        // removed. An aggregator in both a T1 and the T2 batch has weight 2
+        // and earns twice a weight-1 aggregator's share -- the flat
+        // per-address split this replaces paid them only once, stranding the
+        // difference.
+        uint256 aggTotalWeight = snap.aggregatorTotalWeight;
+        if (aggTotalWeight > 0) {
+            uint256 aggWeight = dintaskcoordinatorContract.aggregatorWeight(
+                gi,
+                msg.sender
+            );
+            if (aggWeight > 0) {
+                amount += (snap.aggregatorPool * aggWeight) / aggTotalWeight;
+            }
         }
 
         if (amount == 0) revert TA_NoRewardEarned();

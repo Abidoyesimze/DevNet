@@ -128,15 +128,22 @@ Each GI's pool is funded from (in priority order):
 
 ### Settlement & claims
 
-- **Settlement cadence:** per-GI, at `endGI`. `endGI` computes each participant's entitlement and credits an on-chain `claimable[address]` balance — **pull-payment claim pattern** (`claimRewards()`), never push transfers in loops (gas + reentrancy).
-- **What's on-chain vs off-chain:** scores land on-chain (auditor submissions, already implemented); the median + proportional split must be computed on-chain at settlement so payouts are verifiable. Heavy scoring math stays off-chain in the Python services; the chain only sees submitted scores.
-- **Unclaimed rewards:** claimable indefinitely; no expiry for 2.0.
+Settlement is **per-GI** and split into two on-chain steps so that neither is a loop over participants (BL-10 / DD-4 — the earlier "`endGI` computes every entitlement in one transaction" design was `O(clients + auditors + aggregators)` in a single call and exceeded the L2 block gas limit at spec scale):
+
+1. **`endGI` → `settleRewards(gi, aggregatorTotalWeight)`** stores an O(1) per-GI snapshot: the client / auditor / aggregator pool amounts (the bps split of the funded pool) plus the aggregator-weight total. The treasury share is the rounding-dust remainder (`pool − clientPool − auditorPool − aggregatorPool`), absorbing the bps-split dust so the four shares sum to exactly the pool. No per-client, per-auditor, or per-aggregator iteration runs here.
+2. **`claimReward(gi)`** — each participant calls this once. It computes only *that caller's* share in O(1): client share from their own `finalMedianScore` over `giTotalApprovedScore`; auditor share from their own `auditorGIWeight` over `giTotalAuditWeight`; aggregator share from their own per-(aggregator, finalized-batch) `aggregatorWeight` over the snapshotted total. It credits `claimable[msg.sender]`.
+3. **`claimRewards()`** is unchanged — the pull-payment withdrawal of a caller's accumulated `claimable` balance across all GIs.
+
+- **Incremental totals:** the denominators `claimReward` divides by are accumulated *during* the GI, on loops that already run for other reasons — `giTotalApprovedScore` in `finalizeEvaluation`, `giTotalAuditWeight` / `auditorGIWeight` in `revealAuditScore`, `aggregatorWeight` / `totalAggregatorWeight` in `finalizeT1Aggregation` / `finalizeT2Aggregation`. `settleRewards` therefore needs no scan to derive them.
+- **Aggregator weighting:** one weight unit per (aggregator, finalized T1/T2 batch) pair — an aggregator credited for both a T1 batch and the T2 batch earns a proportionally larger share, not a flat per-address amount.
+- **What's on-chain vs off-chain:** scores land on-chain (auditor submissions, already implemented); the proportional split is computed on-chain — at claim time, per participant — so payouts are verifiable. Heavy scoring math stays off-chain in the Python services; the chain only sees submitted scores.
+- **Unclaimed rewards:** claimable indefinitely; no expiry for 2.0. A participant who never calls `claimReward(gi)` simply leaves their share unaccrued in the contract — it is not swept or reassigned.
 - **Anti-gaming:** duplicate-update discounting is inherent in BlockFLow sequential fold-in (P3-SCR verifies); score inflation by a single auditor is bounded by the median; a client scoring ≤ pass-score threshold earns nothing, so spam costs compute for zero return.
 
 ### Open decisions
 
 - Exact split percentages (simulate in P3-5.2 at 10–50 validators / 100–500 clients per model).
-- Whether aggregator reward should scale with batch size (recommend yes, linear in models aggregated).
+- Aggregator reward now scales with the **number of finalized T1/T2 batches** an aggregator completed (per-batch weighting, shipped in BL-10). Whether it should *also* scale with batch size (linear in models aggregated within a batch) is still open — fold into the P3-5.2 simulation alongside the split percentages.
 - Denominating pool minimums in DIN vs fiat-oracle terms — recommend plain DIN for 2.0, no oracle dependency.
 
 ---
