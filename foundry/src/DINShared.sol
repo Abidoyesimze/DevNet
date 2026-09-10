@@ -72,6 +72,13 @@ interface IDINTaskCoordinator {
     function GI() external view returns (uint256);
 
     function GIstate() external view returns (GIstates);
+
+    /// @dev Per-(aggregator, finalized-batch) settlement weight for a GI,
+    ///      read by DINTaskAuditor.claimReward at claim time (BL-10, #125).
+    function aggregatorWeight(
+        uint256 gi,
+        address aggregator
+    ) external view returns (uint256);
 }
 
 interface IDINTaskAuditor {
@@ -91,10 +98,7 @@ interface IDINTaskAuditor {
 
     function giRewardPool(uint256 gi) external view returns (uint256);
 
-    function settleRewards(
-        uint256 gi,
-        address[] calldata rewardableAggregators
-    ) external;
+    function settleRewards(uint256 gi, uint256 aggregatorTotalWeight) external;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
