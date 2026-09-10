@@ -9,6 +9,7 @@ pragma solidity ^0.8.28;
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {Test} from "forge-std/Test.sol";
+import {stdStorage, StdStorage} from "forge-std/StdStorage.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
 import {DinToken} from "../src/DinToken.sol";
@@ -20,6 +21,8 @@ import {DINTaskAuditor} from "../src/DINTaskAuditor.sol";
 import {GIstates} from "../src/DINShared.sol";
 
 contract RewardEngineTest is Test {
+    using stdStorage for StdStorage;
+
     DinToken tokenImpl;
     DinCoordinator coordinatorImpl;
     DinValidatorStake stakeImpl;
@@ -623,5 +626,234 @@ contract RewardEngineTest is Test {
         vm.prank(nobody);
         vm.expectRevert(abi.encodeWithSignature("TA_NoRewardEarned()"));
         ta.claimReward(1);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Weighted aggregator settlement (BL-10 / #125, task_100926_11 §1)
+    //
+    // #134 shipped an O(1) settleRewards + claimReward(gi), but collapsed
+    // the aggregator side to a flat `aggregatorPool / count` share behind an
+    // isRewardableAggregator boolean -- while still deriving `count` from the
+    // duplicate-containing (aggregator, finalized-batch) list. An aggregator
+    // credited for both a T1 and the T2 batch was counted twice in the
+    // divisor but paid once, permanently stranding one share in the
+    // contract. This PR restores the per-finalized-batch weighting via
+    // DINTaskCoordinator.aggregatorWeight, matching _collectFinalizedBatch-
+    // Aggregators' documented "appears twice, earns proportionally more"
+    // basis (task_210726_6 §3).
+    //
+    // NOTE on constructability: under the current autoCreateTier1AndTier2,
+    // T1 and T2 aggregators are always drawn from disjoint slices of the
+    // shuffled pool, so no aggregator is naturally assigned to both. The
+    // weight-2 case is reachable by the contract's own NatSpec contract but
+    // not by the happy-path assignment, so these tests inject the overlap
+    // via stdstore rather than driving it through a full GI.
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// @dev Force `agg` to carry `weight` finalized-batch units in `gi` and
+    ///      set the GI's aggregator-weight total, as if `agg` had finalized
+    ///      an extra batch. Mirrors what a T1+T2 overlap would produce.
+    function _injectAggregatorOverlap(
+        address agg,
+        uint256 gi,
+        uint256 weight,
+        uint256 total
+    ) internal {
+        stdstore
+            .target(address(tc))
+            .sig("aggregatorWeight(uint256,address)")
+            .with_key(gi)
+            .with_key(agg)
+            .checked_write(weight);
+        stdstore
+            .target(address(tc))
+            .sig("totalAggregatorWeight(uint256)")
+            .with_key(gi)
+            .checked_write(total);
+    }
+
+    function test_aggregatorWeight_accumulatesOnePerFinalizedBatch() public {
+        _runFullHonestGI(10_000 ether);
+
+        // One finalized T1 batch of 3, no T2 batch -> weight 1 each, total 3.
+        assertEq(tc.aggregatorWeight(1, agg1), 1);
+        assertEq(tc.aggregatorWeight(1, agg2), 1);
+        assertEq(tc.aggregatorWeight(1, agg3), 1);
+        assertEq(tc.totalAggregatorWeight(1), 3);
+    }
+
+    function test_endGI_snapshotsAggregatorTotalWeight() public {
+        _runFullHonestGI(10_000 ether);
+
+        vm.prank(modelOwner);
+        tc.endGI(1);
+
+        (, , , uint256 aggTotalWeight, bool settled) = ta.giRewardSnapshot(1);
+        assertTrue(settled);
+        assertEq(aggTotalWeight, 3);
+    }
+
+    function test_claimReward_aggregatorInBothT1AndT2_earnsProportionally()
+        public
+    {
+        uint256 pool = 10_000 ether;
+        _runFullHonestGI(pool);
+
+        // agg1 as if it also finalized the T2 batch: weight 2, GI total 4.
+        _injectAggregatorOverlap(agg1, 1, 2, 4);
+
+        vm.prank(modelOwner);
+        tc.endGI(1);
+
+        vm.prank(agg1);
+        ta.claimReward(1);
+        vm.prank(agg2);
+        ta.claimReward(1);
+        vm.prank(agg3);
+        ta.claimReward(1);
+
+        uint256 aggregatorPool = (pool * 1500) / 10000; // 1,500 ether
+
+        // Weighted: agg1 gets 2/4, agg2 and agg3 get 1/4 each.
+        assertEq(ta.claimable(agg1), (aggregatorPool * 2) / 4);
+        assertEq(ta.claimable(agg2), (aggregatorPool * 1) / 4);
+        assertEq(ta.claimable(agg3), (aggregatorPool * 1) / 4);
+        assertEq(
+            ta.claimable(agg1),
+            2 * ta.claimable(agg2),
+            "double-weight aggregator earns twice a single-weight one"
+        );
+
+        // Nothing stranded: the three shares sum to the whole aggregator pool
+        // (2+1+1 == 4 divides 1,500 ether exactly). The pre-#125 flat split
+        // would have paid agg1 only aggregatorPool/4, leaving aggregatorPool/4
+        // permanently unclaimable.
+        assertEq(
+            ta.claimable(agg1) + ta.claimable(agg2) + ta.claimable(agg3),
+            aggregatorPool,
+            "weighted shares must exhaust the aggregator pool"
+        );
+    }
+
+    function testFuzz_aggregatorInBothBatches_noPoolStranded(
+        uint256 pool
+    ) public {
+        pool = bound(pool, 1 ether, 1_000_000 ether);
+        _runFullHonestGI(pool);
+
+        _injectAggregatorOverlap(agg1, 1, 2, 4);
+
+        vm.prank(modelOwner);
+        tc.endGI(1);
+
+        vm.prank(client1);  ta.claimReward(1);
+        vm.prank(client2);  ta.claimReward(1);
+        vm.prank(client3);  ta.claimReward(1);
+        vm.prank(auditor1); ta.claimReward(1);
+        vm.prank(auditor2); ta.claimReward(1);
+        vm.prank(auditor3); ta.claimReward(1);
+        vm.prank(agg1);     ta.claimReward(1);
+        vm.prank(agg2);     ta.claimReward(1);
+        vm.prank(agg3);     ta.claimReward(1);
+
+        uint256 totalCredited = ta.claimable(client1) +
+            ta.claimable(client2) +
+            ta.claimable(client3) +
+            ta.claimable(auditor1) +
+            ta.claimable(auditor2) +
+            ta.claimable(auditor3) +
+            ta.claimable(agg1) +
+            ta.claimable(agg2) +
+            ta.claimable(agg3) +
+            ta.treasuryAccrued();
+
+        // Never mints out of thin air, and never strands more than a handful
+        // of wei of integer-division dust (3-way client + 3-way auditor +
+        // 4-way aggregator splits). A missed aggregator share would be
+        // ~aggregatorPool/4 -- orders of magnitude past this bound.
+        assertLe(totalCredited, pool);
+        assertGe(totalCredited, pool - 100);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // endGI gas: O(1) in participant count (BL-10 / #127, task_100926_11 §3)
+    //
+    // Full methodology parity with SecurityFindings.t.sol's
+    // test_gas_finalizeEvaluation_and_slashAuditors_atScale (a two-scale
+    // marginal-cost measurement) needs a GI fixture parametrised by client
+    // and auditor count, which _runFullHonestGI is not. What these two tests
+    // establish instead: endGI/settleRewards read only scalars after BL-10
+    // (the rewardableAggregators array and the _settleClient/_settleAuditor/
+    // _settleAggregator loops are deleted), so endGI's cost cannot grow with
+    // participant count. The pre-BL-10 endGI path cost was measured in
+    // SecurityFindings.t.sol and blew the L2 block gas limit at spec scale.
+    // ─────────────────────────────────────────────────────────────────────
+
+    function test_gas_endGI_underConstantCeiling() public {
+        _runFullHonestGI(10_000 ether);
+
+        uint256 gasBefore = gasleft();
+        vm.prank(modelOwner);
+        tc.endGI(1);
+        uint256 endGIGas = gasBefore - gasleft();
+
+        emit log_named_uint("endGI gas (3 clients / 3 auditors / 3 aggregators)", endGIGas);
+
+        // No participant-indexed loop remains; endGI is a bounded state
+        // transition (one cross-contract call, ~4 mul + 4 div, one struct
+        // SSTORE, one event). Ceiling is generous headroom over the measured
+        // cost, not a tight bound -- its job is to fail loudly if a loop is
+        // ever reintroduced into this path.
+        assertLt(endGIGas, 150_000, "endGI must stay a bounded O(1) transition");
+    }
+
+    function test_gas_endGI_invariantToSettlementScale() public {
+        // Baseline: standard 3/3/3 GI.
+        _runFullHonestGI(10_000 ether);
+        uint256 gasBefore = gasleft();
+        vm.prank(modelOwner);
+        tc.endGI(1);
+        uint256 gasBaseline = gasBefore - gasleft();
+
+        // Fresh GI, but every incremental total endGI's settlement path could
+        // conceivably touch is inflated to spec scale (500 clients * 100-pt
+        // scores, 500 auditors * 100 votes, 50 batches * 3 aggregators)
+        // before endGI. endGI reads totalAggregatorWeight (1 SLOAD) and
+        // settleRewards reads none of these -- so the gas must not move.
+        _runFullHonestGI(10_000 ether);
+        stdstore
+            .target(address(ta))
+            .sig("giTotalApprovedScore(uint256)")
+            .with_key(uint256(1))
+            .checked_write(uint256(500 * 100));
+        stdstore
+            .target(address(ta))
+            .sig("giTotalAuditWeight(uint256)")
+            .with_key(uint256(1))
+            .checked_write(uint256(500 * 100));
+        stdstore
+            .target(address(tc))
+            .sig("totalAggregatorWeight(uint256)")
+            .with_key(uint256(1))
+            .checked_write(uint256(50 * 3));
+
+        gasBefore = gasleft();
+        vm.prank(modelOwner);
+        tc.endGI(1);
+        uint256 gasAtScale = gasBefore - gasleft();
+
+        emit log_named_uint("endGI gas, 3/3/3 baseline", gasBaseline);
+        emit log_named_uint("endGI gas, spec-scale totals injected", gasAtScale);
+
+        // Injecting totals ~16000x larger moves endGI gas by a handful (state
+        // access-list bookkeeping from the stdstore writes), not by anything
+        // that scales with the injected magnitude. A reintroduced O(n)
+        // settlement loop would add thousands of gas per participant.
+        assertApproxEqAbs(
+            gasAtScale,
+            gasBaseline,
+            100,
+            "endGI gas must not scale with settlement-total magnitude"
+        );
     }
 }
