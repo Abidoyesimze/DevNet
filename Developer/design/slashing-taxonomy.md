@@ -67,7 +67,7 @@ Invariant tests (Part 4b) exercise S1/S2's existing `slash()` path only — S3�
 
 ## Bond denomination (§9 item 7 — now resolved)
 
-`disputeBond` (`DINTaskCoordinator.sol:102`) is DIN-denominated. This closes
+`disputeBond` (`DINTaskCoordinator.sol:110`) is DIN-denominated. This closes
 §9 item 7 ("Dispute bond size & window length") on the denomination question.
 
 Dispute bonds are a **slashing-pattern security deposit**, not a network-fee
@@ -94,7 +94,7 @@ Keeping DIN for dispute bonds means:
 - Bond denomination stays consistent with item 1's DIN resolution across all
   slashing-pattern instruments in the protocol.
 
-The `resolveDispute` forfeiture TODO (`DINTaskCoordinator.sol:1092`) already
+The `resolveDispute` forfeiture TODO (`DINTaskCoordinator.sol:1099`) already
 cites MECHANISM_DESIGN.md §4's burn/treasury destination explicitly — the
 scaffold's author already treated this as a slashing-pattern instrument before
 this item was filed.
