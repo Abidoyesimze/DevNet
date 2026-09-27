@@ -1,9 +1,12 @@
 # Storage Layout — DIN Platform Contracts
 
-This document covers the storage layout rules and variable inventory for the four
-upgradeable platform contracts. All four follow the OpenZeppelin Transparent Proxy
-pattern (`Initializable`, `OwnableUpgradeable`) and carry a `uint256[50] private __gap`
-reservation at each inheritance level to allow safe future additions.
+This document covers the storage layout rules and variable inventory for the eight
+upgradeable platform contracts: `DinToken`, `DinCoordinator`, `DinValidatorStake`,
+`DINModelRegistry`, `DinEmission`, `DinFeeRouter`, `DinTreasury` and
+`DinFairLaunchDistributor`. All follow the OpenZeppelin Transparent Proxy pattern
+(`Initializable`, `OwnableUpgradeable`) and end their own block with a
+`uint256[50] private __gap` reservation to allow safe future additions. Contract-own slot numbers below are from
+`forge inspect <Contract> storageLayout`.
 
 ---
 
@@ -67,17 +70,22 @@ Future variables must be inserted above `__gap`, reducing its size accordingly.
 [OwnableUpgradeable]
   _owner            : address
 ─────────────────────────────────── contract-own slots ───
-  dinToken                    : address   (DinToken proxy)
-  dinValidatorStakeContract   : address   (IDinValidatorStake)
-  dinPerEth                   : uint256   (exchange rate, 1e18-scaled)
-  treasury                    : address   (fee-router destination for withdraw())
-  __gap                       : uint256[50]
+  dinToken                    : DinToken             (slot 0)
+  dinValidatorStakeContract   : IDinValidatorStake   (slot 1)
+  dinPerEth                   : uint256              (slot 2, exchange rate, 1e18-scaled)
+  faucetRetired               : bool                 (slot 3)
+  mintCap                     : uint256              (slot 4, 0 = uncapped)
+  totalMinted                 : uint256              (slot 5)
+  feeRouter                   : IDinFeeRouter        (slot 6)
+  emissionContract            : address              (slot 7)
+  __gap                       : uint256[50]          (slot 8)
 ```
 
-`dinValidatorStakeContract` is written once by `updateValidatorStakeContract`.
-`dinPerEth` is mutable via `updateDinPerEth`. `treasury` is mutable via `setTreasury`;
-`withdraw()` reverts with `TreasuryNotSet` until it's set. `__gap` stays at `[50]`
-rather than shrinking — see "Core rules" above for why that's fine pre-deployment.
+`dinValidatorStakeContract` is set by `updateValidatorStakeContract`, `dinPerEth` by
+`updateDinPerEth`, `mintCap` by `setMintCap`, `feeRouter` by `setFeeRouter` and
+`emissionContract` by `setEmissionContract`. `faucetRetired` is flipped one-way by
+`retireFaucet`. `__gap` stays at `[50]` rather than shrinking — see "Core rules"
+above for why that's fine pre-deployment.
 
 ---
 
@@ -89,15 +97,34 @@ rather than shrinking — see "Core rules" above for why that's fine pre-deploym
 [OwnableUpgradeable]
   _owner            : address
 ─────────────────────────────────── contract-own slots ───
-  DIN_TOKEN           : IERC20   (immutable after initialize)
-  DIN_COORDINATOR     : address  (immutable after initialize)
-  slasherContracts    : mapping(address => bool)
-  validators          : mapping(address => ValidatorInfo)
-  __gap               : uint256[50]
+  DIN_TOKEN                              : IERC20                                   (slot 0)
+  DIN_COORDINATOR                        : address                                  (slot 1)
+  MIN_STAKE                              : uint256                                  (slot 2)
+  UNBONDING_PERIOD                       : uint64                                   (slot 3)
+  slasherContracts                       : mapping(address => bool)                 (slot 4)
+  validators                             : mapping(address => ValidatorInfo)        (slot 5)
+  modelMinStakeBounds                    : mapping(uint256 => ModelStakeBounds)     (slot 6)
+  maxConcurrentRegistrationsPerStakeUnit : uint256                                  (slot 7)
+  slashTreasury                          : address                                  (slot 8)
+  encryptionKeys                         : mapping(address => bytes)                (slot 9)
+  activeRegistrationCount                : mapping(address => uint256)              (slot 10)
+  s5RecidivismWindow                     : uint256                                  (slot 11)
+  s5RecidivismThreshold                  : uint256                                  (slot 12)
+  s5JailDuration                         : uint256                                  (slot 13)
+  _partialSlashGIs                       : mapping(address => mapping(address => uint256[]))  (slot 14)
+  s6NoParticipationThreshold             : uint256                                  (slot 15)
+  s6NoParticipationCount                 : mapping(address => uint256)              (slot 16)
+  __gap                                  : uint256[50]                              (slot 17)
 ```
 
-`ValidatorInfo` is a struct packed into a single mapping entry; its internal layout
-does not affect the contract's top-level slot numbering.
+`DIN_TOKEN` / `DIN_COORDINATOR` are set once in `initialize` (upper-case names, but
+ordinary storage, not `immutable`). `MIN_STAKE` and `UNBONDING_PERIOD` are initialised
+to `10 DIN` / `7 days` and owner-settable (`setMinStake`, `setUnbondingPeriod`), as are
+`modelMinStakeBounds`, `maxConcurrentRegistrationsPerStakeUnit` and `slashTreasury`.
+`UNBONDING_PERIOD` is a `uint64` but still takes a full slot: the next variable is a
+mapping, which always starts a new slot. `ValidatorInfo` / `ModelStakeBounds` are
+structs stored inside mapping entries; their internal layout does not affect the
+contract's top-level slot numbering.
 
 ---
 
@@ -130,6 +157,103 @@ Contract-own slot numbers are from `forge inspect DINModelRegistry storageLayout
 Ownership is plain `OwnableUpgradeable` — there is no separate `daoAdmin` slot.
 `_modelIdByTaskCoordinator` / `_modelIdByTaskAuditor` store `modelId + 1` so that
 `0` means "not registered".
+
+---
+
+## DinEmission
+
+```
+[Initializable]
+  _initialized      : uint64
+[OwnableUpgradeable]
+  _owner            : address
+[ReentrancyGuardTransient]
+  (transient lock only — no persistent slot)
+─────────────────────────────────── contract-own slots ───
+  coordinator          : IDinCoordinator                                (slot 0)
+  dinToken             : IERC20                                         (slot 1)
+  initialEmissionPerGI : uint256                                        (slot 2)
+  decayBps             : uint256                                        (slot 3)
+  epochLength          : uint256                                        (slot 4)
+  maxEpochs            : uint256                                        (slot 5)
+  emissionState        : mapping(address => EmissionState)              (slot 6)
+  totalEmitted         : uint256                                        (slot 7)
+  giEmissionFunded     : mapping(address => mapping(uint256 => bool))   (slot 8)
+  __gap                : uint256[50]                                    (slot 9)
+```
+
+---
+
+## DinFeeRouter
+
+```
+[Initializable]
+  _initialized      : uint64
+[OwnableUpgradeable]
+  _owner            : address
+[ReentrancyGuardTransient]
+  (transient lock only — no persistent slot)
+─────────────────────────────────── contract-own slots ───
+  dinToken           : IBurnableERC20                (slot 0)
+  treasury           : address                       (slot 1, bytes 0–19)
+  treasuryBpsCeiling : uint16                        (slot 1, bytes 20–21 — packed with treasury)
+  feeSources         : mapping(address => bool)      (slot 2)
+  dinSplit           : DinSplit                      (slot 3 — 5 × uint16, one slot)
+  ethSplit           : EthSplit                      (slot 4 — 4 × uint16, one slot)
+  accruedDin         : mapping(bytes32 => uint256)   (slot 5)
+  accruedEth         : mapping(bytes32 => uint256)   (slot 6)
+  __gap              : uint256[50]                   (slot 7)
+```
+
+`treasury` and `treasuryBpsCeiling` share slot 1, and each split struct fits in a
+single slot. Adding a field to `DinSplit`/`EthSplit` can still fit in that slot (up
+to 16 × `uint16`), but inserting a variable between `treasury` and
+`treasuryBpsCeiling`, or widening either, changes the packing — treat slot 1 as fixed.
+
+---
+
+## DinTreasury
+
+```
+[Initializable]
+  _initialized      : uint64
+[OwnableUpgradeable]
+  _owner            : address
+[ReentrancyGuardTransient]
+  (transient lock only — no persistent slot)
+─────────────────────────────────── contract-own slots ───
+  __gap              : uint256[50]   (slot 0)
+```
+
+`DinTreasury` holds ETH/ERC20 balances only; it has no contract-own state yet, so the
+whole block is reserved.
+
+---
+
+## DinFairLaunchDistributor
+
+```
+[Initializable]
+  _initialized      : uint64
+[OwnableUpgradeable]
+  _owner            : address
+[ReentrancyGuardTransient]
+  (transient lock only — no persistent slot)
+─────────────────────────────────── contract-own slots ───
+  dinToken              : IERC20                               (slot 0)
+  merkleRoot            : bytes32                              (slot 1)
+  claimsOpen            : bool                                 (slot 2, byte 0)
+  cliffDuration         : uint64                               (slot 2, bytes 1–8)
+  vestingDuration       : uint64                               (slot 2, bytes 9–16)
+  vestingStart          : uint64                               (slot 2, bytes 17–24)
+  totalFunded           : uint256                              (slot 3)
+  totalClaimedPrincipal : uint256                              (slot 4)
+  positions             : mapping(address => VestingPosition)  (slot 5)
+  hasClaimed            : mapping(address => bool)             (slot 6)
+  __gap                 : uint256[50]                          (slot 7)
+```
+
+`claimsOpen` and the three `uint64` vesting fields pack into slot 2.
 
 ---
 

@@ -110,7 +110,7 @@ contract DinEmission is Initializable, OwnableUpgradeable, ReentrancyGuardTransi
     mapping(address => mapping(uint256 => bool)) public giEmissionFunded;
 
     // Reserved for future state variables.
-    uint256[40] private __gap;
+    uint256[50] private __gap;
 
     // ── Constructor / initializer ─────────────────────────────────────────
 
