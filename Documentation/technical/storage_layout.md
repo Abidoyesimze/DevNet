@@ -27,10 +27,12 @@ soon as a proxy is actually deployed and holds state worth preserving.
 must not be touched.
 
 **`ReentrancyGuardTransient` is slot-neutral.** `DinCoordinator`,
-`DinValidatorStake`, and `DINModelRegistry` (added for the `requestModelRegistration`
-overpayment refund, L-3) inherit from `ReentrancyGuardTransient`, which stores its
-lock in EIP-1153 transient storage (cleared each transaction). It contributes zero
-persistent storage slots.
+`DinValidatorStake`, `DinEmission`, `DinFeeRouter`, `DinTreasury`,
+`DinFairLaunchDistributor`, and `DINModelRegistry` (added for the
+`requestModelRegistration` / `requestManifestUpdate` overpayment refunds, L-3)
+inherit from `ReentrancyGuardTransient`, which stores its lock in EIP-1153
+transient storage (cleared each transaction). It contributes zero persistent
+storage slots.
 
 ---
 
@@ -106,21 +108,28 @@ does not affect the contract's top-level slot numbering.
   _initialized      : uint64
 [OwnableUpgradeable]
   _owner            : address
+[ReentrancyGuardTransient]
+  (transient lock only — no persistent slot)
 ─────────────────────────────────── contract-own slots ───
-  daoAdmin            : address
-  modelCount          : uint256
-  models              : mapping(uint256 => Model)
-  modelIdByCoordinator: mapping(address => uint256)
-  modelIdByAuditor    : mapping(address => uint256)
-  proprietaryFee      : uint256
-  pendingModels       : mapping(uint256 => PendingModel)
-  pendingCount        : uint256
-  __gap               : uint256[50]
+  dinValidatorStake        : IDinValidatorStake        (slot 0)
+  openSourceFee            : uint256                   (slot 1)
+  proprietaryFee           : uint256                   (slot 2)
+  openSourceUpdateFee      : uint256                   (slot 3)
+  proprietaryUpdateFee     : uint256                   (slot 4)
+  models                   : Model[]                   (slot 5)
+  modelRequests            : ModelRequest[]            (slot 6)
+  manifestRequests         : ManifestUpdateRequest[]   (slot 7)
+  _modelIdByTaskCoordinator: mapping(address => uint256)  (slot 8)
+  _modelIdByTaskAuditor    : mapping(address => uint256)  (slot 9)
+  modelDisabled            : mapping(uint256 => bool)     (slot 10)
+  feeRouter                : IDinFeeRouter             (slot 11)
+  __gap                    : uint256[50]               (slot 12)
 ```
 
-`daoAdmin` exists alongside `_owner` to preserve backward compatibility with
-external callers that used the old `daoAdmin()` accessor. `setDAOAdmin` updates
-both `daoAdmin` and transfers OZ ownership simultaneously.
+Contract-own slot numbers are from `forge inspect DINModelRegistry storageLayout`.
+Ownership is plain `OwnableUpgradeable` — there is no separate `daoAdmin` slot.
+`_modelIdByTaskCoordinator` / `_modelIdByTaskAuditor` store `modelId + 1` so that
+`0` means "not registered".
 
 ---
 

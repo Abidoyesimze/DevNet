@@ -271,6 +271,10 @@ contract DINModelRegistry is Initializable, OwnableUpgradeable, ReentrancyGuardT
     }
 
     /// @notice Submits a manifest update request for an existing model.
+    /// @dev Any `msg.value` above `requiredFee` is refunded to the caller, same
+    ///      as `requestModelRegistration` (L-3) -- `feePaid` always records
+    ///      `requiredFee`. `nonReentrant` because the refund is an external
+    ///      call to `msg.sender`.
     /// @param modelId ID of the model to update.
     /// @param newManifestCID IPFS CID of the new manifest.
     /// @return requestId Index of the created request in the manifestRequests array.
@@ -280,6 +284,7 @@ contract DINModelRegistry is Initializable, OwnableUpgradeable, ReentrancyGuardT
     )
         external
         payable
+        nonReentrant
         onlyModelOwner(modelId)
         notDisabled(modelId)
         returns (uint256 requestId)
@@ -299,13 +304,19 @@ contract DINModelRegistry is Initializable, OwnableUpgradeable, ReentrancyGuardT
                 modelId: modelId,
                 newManifestCID: newManifestCID,
                 requester: msg.sender,
-                feePaid: msg.value,
+                feePaid: requiredFee,
                 processed: false,
                 approved: false
             })
         );
 
         emit ManifestUpdateRequested(requestId, modelId);
+
+        uint256 overpayment = msg.value - requiredFee;
+        if (overpayment > 0) {
+            (bool ok, ) = msg.sender.call{value: overpayment}("");
+            if (!ok) revert RefundFailed();
+        }
     }
 
     /// @notice Approves a manifest update and writes the new CID to the model record.

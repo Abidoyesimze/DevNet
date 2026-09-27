@@ -84,10 +84,11 @@ contract DinCoordinator is
     ///         the caller at the current exchange rate.
     /// @dev Rate is a fixed-point value scaled by 1e18. Reverts if the faucet
     ///      has been retired, if minting would exceed the cap (when set), or
-    ///      if `dinPerEth` isn't a clean multiple of 1e18 and `msg.value` is
-    ///      small enough that integer division rounds the mint to zero (L-2)
-    ///      -- without this check the ETH would be accepted and kept with
-    ///      nothing minted in return.
+    ///      if integer division rounds the mint to zero, i.e.
+    ///      `msg.value * dinPerEth < 1e18` (L-2). That is only reachable
+    ///      when `dinPerEth < 1e18` (less than 1 DIN-wei per wei) -- without
+    ///      this check the ETH would be accepted and kept with nothing
+    ///      minted in return.
     function depositAndMint() external payable nonReentrant {
         if (faucetRetired) revert FaucetRetired();
         if (msg.value == 0) revert ZeroValue();

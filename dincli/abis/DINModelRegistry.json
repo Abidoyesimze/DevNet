@@ -998,6 +998,16 @@
     },
     {
       "type": "error",
+      "name": "ReentrancyGuardReentrantCall",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "RefundFailed",
+      "inputs": []
+    },
+    {
+      "type": "error",
       "name": "TaskAuditorAlreadyRegistered",
       "inputs": []
     },

@@ -133,9 +133,9 @@ contract DinCoordinatorTest is Test {
     // ── depositAndMint: zero-mint rounding (L-2) ─────────────────────────────────
 
     function test_depositAndMint_revertsWhenMintAmountRoundsToZero() public {
-        // A non-round dinPerEth (1 wei of the scaled unit, vs. the default
-        // 1_000_000 * 1e18) means any msg.value below 1e18 wei rounds to a
-        // zero mint via integer division.
+        // Zero-mint needs msg.value * dinPerEth < 1e18, only reachable when
+        // dinPerEth < 1e18. dinPerEth = 1 (vs. the default 1_000_000 * 1e18)
+        // makes any msg.value below 1e18 wei round to a zero mint.
         coordinator.updateDinPerEth(1);
 
         vm.deal(alice, 1 ether);
