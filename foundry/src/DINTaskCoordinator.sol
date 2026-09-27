@@ -233,6 +233,15 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     );
     event S2SlashFractionBpsUpdated(uint256 oldBps, uint256 newBps);
 
+    // ── Indexer lifecycle events (task_240926_16 Part C / issue #153) ──────────
+    /// @notice Emitted on every GI state transition.
+    /// @dev GI is 0 during constructor/setup transitions (ordinals 0–4); expected.
+    event GIStateChanged(uint indexed GI, uint8 indexed newState);
+    event T1AggregationSubmitted(uint indexed GI, uint indexed batchId, address indexed aggregator, bytes32 cid);
+    event T2AggregationSubmitted(uint indexed GI, uint indexed batchId, address indexed aggregator, bytes32 cid);
+    event T1BatchFinalized(uint indexed GI, uint indexed batchId, bytes32 winningCID);
+    event T2Finalized(uint indexed GI, bytes32 globalModelCID);
+
     /// @notice Model registry ID this coordinator manages.
     /// @dev Used to look up modelMinStakeBounds and enforce per-model stake floors.
     uint256 public immutable modelId;
@@ -247,7 +256,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
             dinvalidatorStakeContract_address
         );
         modelId = modelId_;
-        GIstate = GIstates.AwaitingDINTaskAuditorToBeSet;
+        _setGIstate(GIstates.AwaitingDINTaskAuditorToBeSet);
     }
 
     /// @notice Sets the paired DINTaskAuditor contract for this model.
@@ -261,7 +270,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         dinTaskAuditorContract = IDINTaskAuditor(
             _dintaskauditor_contract_address
         );
-        GIstate = GIstates.AwaitingDINTaskCoordinatorAsSlasher;
+        _setGIstate(GIstates.AwaitingDINTaskCoordinatorAsSlasher);
     }
 
     /// @notice Confirms that this coordinator is registered as a slasher on the
@@ -273,7 +282,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
             revert TC_CoordinatorCannotBeSetAsSlasher();
         if (!dinvalidatorStakeContract.isSlasherContract(address(this)))
             revert TC_CoordinatorIsNotSlasher();
-        GIstate = GIstates.AwaitingDINTaskAuditorAsSlasher;
+        _setGIstate(GIstates.AwaitingDINTaskAuditorAsSlasher);
     }
 
     /// @notice Confirms that the paired DINTaskAuditor is registered as a slasher,
@@ -288,7 +297,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
                 address(dinTaskAuditorContract)
             )
         ) revert TC_AuditorIsNotSlasher();
-        GIstate = GIstates.AwaitingGenesisModel;
+        _setGIstate(GIstates.AwaitingGenesisModel);
     }
 
     /// @notice Records the genesis model IPFS hash, enabling GI 1 to be started.
@@ -299,7 +308,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         if (GIstate != GIstates.AwaitingGenesisModel)
             revert TC_GenesisModelHashCannotBeSet();
         genesisModelIpfsHash = _genesisModelIpfsHash;
-        GIstate = GIstates.GenesisModelCreated;
+        _setGIstate(GIstates.GenesisModelCreated);
     }
 
     /// @notice Starts the next Global Iteration and updates the auditor pass score.
@@ -329,8 +338,8 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         if (updatePassScore) {
             dinTaskAuditorContract.updatePassScore(score);
         }
-        GIstate = GIstates.GIstarted;
         GI++;
+        _setGIstate(GIstates.GIstarted);
     }
 
     /// @notice Opens the aggregator registration window for the current GI.
@@ -340,7 +349,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     ) public onlyOwner onlyCurrentGI(_GI) {
         if (GIstate != GIstates.GIstarted)
             revert TC_AggregatorsRegistrationCannotBeStarted();
-        GIstate = GIstates.DINaggregatorsRegistrationStarted;
+        _setGIstate(GIstates.DINaggregatorsRegistrationStarted);
     }
 
     /// @notice Registers the caller as an aggregator for the current GI.
@@ -388,7 +397,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     ) public onlyOwner onlyCurrentGI(_GI) {
         if (GIstate != GIstates.DINaggregatorsRegistrationStarted)
             revert TC_AggregatorsRegistrationCannotBeFinished();
-        GIstate = GIstates.DINaggregatorsRegistrationClosed;
+        _setGIstate(GIstates.DINaggregatorsRegistrationClosed);
     }
 
     /// @notice Returns the list of aggregators registered for the given GI.
@@ -407,7 +416,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     ) public onlyOwner onlyCurrentGI(_GI) {
         if (GIstate != GIstates.DINaggregatorsRegistrationClosed)
             revert TC_AuditorsRegistrationCannotBeStarted();
-        GIstate = GIstates.DINauditorsRegistrationStarted;
+        _setGIstate(GIstates.DINauditorsRegistrationStarted);
     }
 
     /// @notice Closes the auditor registration window.
@@ -417,7 +426,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     ) public onlyOwner onlyCurrentGI(_GI) {
         if (GIstate != GIstates.DINauditorsRegistrationStarted)
             revert TC_AuditorsRegistrationCannotBeFinished();
-        GIstate = GIstates.DINauditorsRegistrationClosed;
+        _setGIstate(GIstates.DINauditorsRegistrationClosed);
     }
 
     /// @notice Opens the local model submission window for the current GI.
@@ -425,14 +434,14 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     function startLMsubmissions(uint _GI) public onlyOwner onlyCurrentGI(_GI) {
         if (GIstate != GIstates.DINauditorsRegistrationClosed)
             revert TC_LMSubmissionsCannotBeStarted();
-        GIstate = GIstates.LMSstarted;
+        _setGIstate(GIstates.LMSstarted);
     }
 
     /// @notice Closes the local model submission window.
     /// @param _GI Current GI index.
     function closeLMsubmissions(uint _GI) public onlyOwner onlyCurrentGI(_GI) {
         if (GIstate != GIstates.LMSstarted) revert TC_LMSubmissionsNotStarted();
-        GIstate = GIstates.LMSclosed;
+        _setGIstate(GIstates.LMSclosed);
     }
 
     /// @notice Delegates auditor batch creation to DINTaskAuditor and advances GI state.
@@ -446,7 +455,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         bool success = dinTaskAuditorContract.createAuditorsBatches(_GI);
         if (!success) revert TC_FailedToCreateAuditorsBatches();
 
-        GIstate = GIstates.AuditorsBatchesCreated;
+        _setGIstate(GIstates.AuditorsBatchesCreated);
     }
 
     /// @notice Propagates the test data assignment flag to DINTaskAuditor.
@@ -471,7 +480,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     ) public onlyOwner onlyCurrentGI(_GI) {
         if (GIstate != GIstates.AuditorsBatchesCreated)
             revert TC_LMEvalCannotBeStarted();
-        GIstate = GIstates.LMSevaluationStarted;
+        _setGIstate(GIstates.LMSevaluationStarted);
     }
 
     /// @notice Closes the commit phase and opens the REVEAL phase (task_210726_6
@@ -484,7 +493,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     ) external onlyOwner onlyCurrentGI(_GI) {
         if (GIstate != GIstates.LMSevaluationStarted)
             revert TC_RevealCannotBeStarted();
-        GIstate = GIstates.LMSevaluationRevealStarted;
+        _setGIstate(GIstates.LMSevaluationRevealStarted);
     }
 
     /// @notice Closes the LMS evaluation reveal phase and finalises audit
@@ -498,7 +507,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
             revert TC_LMEvalCannotBeFinished();
         bool success = dinTaskAuditorContract.finalizeEvaluation(_GI);
         if (!success) revert TC_FailedToFinalizeEvaluation();
-        GIstate = GIstates.LMSevaluationClosed;
+        _setGIstate(GIstates.LMSevaluationClosed);
     }
 
     /// @notice Partitions active aggregators and approved models into Tier-1 batches
@@ -571,7 +580,16 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
             emit Tier2BatchAuto(_GI, t2.batchId);
         }
 
-        GIstate = GIstates.T1nT2Bcreated;
+        _setGIstate(GIstates.T1nT2Bcreated);
+    }
+
+    // ──────────── internal helpers ────────────
+
+    /// @dev Assigns the new GI state and emits GIStateChanged.
+    ///      GI is 0 during constructor/setup transitions (ordinals 0–4); expected.
+    function _setGIstate(GIstates newState) internal {
+        GIstate = newState;
+        emit GIStateChanged(GI, uint8(newState));
     }
 
     // ──────────── internal shuffle helpers ────────────
@@ -707,7 +725,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     ) external onlyOwner onlyCurrentGI(_GI) {
         if (GIstate != GIstates.T1nT2Bcreated)
             revert TC_NotReadyForT1Aggregation();
-        GIstate = GIstates.T1AggregationStarted;
+        _setGIstate(GIstates.T1AggregationStarted);
     }
 
     /// @notice Submits an aggregation result CID for a Tier-1 batch.
@@ -737,6 +755,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
 
         t1Submitted[_GI][_batchId][msg.sender] = true;
         t1SubmissionCID[_GI][_batchId][msg.sender] = _aggregationCID;
+        emit T1AggregationSubmitted(_GI, _batchId, msg.sender, _aggregationCID);
 
         // Increment vote count
         t1Votes[_GI][_batchId][_aggregationCID]++;
@@ -791,9 +810,10 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
             b.finalized = true;
             b.finalCID = winningCID;
             tier1FinalizedAt[_GI][b.batchId] = uint64(block.timestamp);
+            emit T1BatchFinalized(_GI, b.batchId, winningCID);
         }
 
-        GIstate = GIstates.T1AggregationDone;
+        _setGIstate(GIstates.T1AggregationDone);
     }
 
     /// @notice Opens the Tier-2 aggregation submission window.
@@ -803,7 +823,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     ) external onlyOwner onlyCurrentGI(_GI) {
         if (GIstate != GIstates.T1AggregationDone)
             revert TC_NotReadyForT2Aggregation();
-        GIstate = GIstates.T2AggregationStarted;
+        _setGIstate(GIstates.T2AggregationStarted);
     }
 
     /// @notice Submits an aggregation result CID for the Tier-2 batch.
@@ -832,6 +852,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
 
         t2Submitted[_GI][_batchId][msg.sender] = true;
         t2SubmissionCID[_GI][_batchId][msg.sender] = _aggregationCID;
+        emit T2AggregationSubmitted(_GI, _batchId, msg.sender, _aggregationCID);
 
         // Increment vote count
         t2Votes[_GI][_batchId][_aggregationCID]++;
@@ -883,9 +904,10 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
             b.finalized = true;
             b.finalCID = winningCID;
             tier2FinalizedAt[_GI][b.batchId] = uint64(block.timestamp);
+            emit T2Finalized(_GI, winningCID);
         }
 
-        GIstate = GIstates.T2AggregationDone;
+        _setGIstate(GIstates.T2AggregationDone);
     }
 
     /// @notice Triggers auditor slashing on the paired DINTaskAuditor contract.
@@ -896,7 +918,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
             revert TC_NotReadyToSlashAuditors();
         bool success = dinTaskAuditorContract.slashAuditors(_GI);
         if (!success) revert TC_FailedToSlashAuditors();
-        GIstate = GIstates.AuditorsSlashed;
+        _setGIstate(GIstates.AuditorsSlashed);
     }
 
     /// @notice Slashes aggregators in both Tier-1 and Tier-2 batches that failed
@@ -983,7 +1005,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
             }
         }
 
-        GIstate = GIstates.AggregatorsSlashed;
+        _setGIstate(GIstates.AggregatorsSlashed);
     }
 
     /// @notice Records the Tier-2 aggregation quality score for the current GI.
@@ -1035,7 +1057,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
 
         dinTaskAuditorContract.settleRewards(_GI, totalAggregatorWeight[_GI]);
 
-        GIstate = GIstates.GIended;
+        _setGIstate(GIstates.GIended);
     }
 
     /// @notice Decrements the concurrent-registration counter on DinValidatorStake
