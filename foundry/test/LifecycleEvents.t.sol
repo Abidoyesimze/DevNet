@@ -36,6 +36,9 @@ contract LifecycleEventsTest is Test {
     address auditor1   = makeAddr("auditor1");
     address auditor2   = makeAddr("auditor2");
     address auditor3   = makeAddr("auditor3");
+    address auditor4   = makeAddr("auditor4");
+    address auditor5   = makeAddr("auditor5");
+    address auditor6   = makeAddr("auditor6");
     address agg1       = makeAddr("agg1");
     address agg2       = makeAddr("agg2");
     address agg3       = makeAddr("agg3");
@@ -45,6 +48,9 @@ contract LifecycleEventsTest is Test {
     address client1    = makeAddr("client1");
     address client2    = makeAddr("client2");
     address client3    = makeAddr("client3");
+    address client4    = makeAddr("client4");
+    address client5    = makeAddr("client5");
+    address client6    = makeAddr("client6");
 
     bytes32 constant TEST_SALT = bytes32(uint256(0xC0FFEE));
     bytes32 constant CID_A     = bytes32(uint256(0xA1));
@@ -143,13 +149,20 @@ contract LifecycleEventsTest is Test {
 
     /// @dev Advances to LMSstarted with 6 aggs and 3 auditors registered.
     function _setupToLMS(uint256 giIndex, uint256 pool) internal {
+        _setupToLMS(giIndex, pool, 3);
+    }
+
+    /// @dev Advances to LMSstarted with 6 aggs and `nAuditors` (3 or 6) auditors
+    ///      registered — 6 auditors cover two auditor batches (auditorsPerBatch = 3).
+    function _setupToLMS(uint256 giIndex, uint256 pool, uint256 nAuditors) internal {
+        address[6] memory auditors = [auditor1, auditor2, auditor3, auditor4, auditor5, auditor6];
         for (uint i = 0; i < 6; i++) {
             address agg = [agg1, agg2, agg3, agg4, agg5, agg6][i];
             _fundAndStake(agg);
         }
-        _fundAndStake(auditor1);
-        _fundAndStake(auditor2);
-        _fundAndStake(auditor3);
+        for (uint i = 0; i < nAuditors; i++) {
+            _fundAndStake(auditors[i]);
+        }
 
         _fundDin(modelOwner, pool);
         vm.prank(modelOwner);
@@ -172,9 +185,9 @@ contract LifecycleEventsTest is Test {
         tc.startDINauditorsRegistration(giIndex);
         vm.stopPrank();
 
-        vm.prank(auditor1); ta.registerDINAuditor(giIndex);
-        vm.prank(auditor2); ta.registerDINAuditor(giIndex);
-        vm.prank(auditor3); ta.registerDINAuditor(giIndex);
+        for (uint i = 0; i < nAuditors; i++) {
+            vm.prank(auditors[i]); ta.registerDINAuditor(giIndex);
+        }
 
         vm.startPrank(modelOwner);
         tc.closeDINauditorsRegistration(giIndex);
@@ -184,9 +197,17 @@ contract LifecycleEventsTest is Test {
 
     /// @dev Submits 3 local models and advances through eval to T1AggregationStarted.
     function _advanceToT1(uint256 giIndex) internal {
-        vm.prank(client1); ta.submitLocalModel(bytes32(uint256(100)), giIndex);
-        vm.prank(client2); ta.submitLocalModel(bytes32(uint256(200)), giIndex);
-        vm.prank(client3); ta.submitLocalModel(bytes32(uint256(300)), giIndex);
+        _advanceToT1(giIndex, 3);
+    }
+
+    /// @dev Submits `nClients` (3 or 6) local models and advances through eval to
+    ///      T1AggregationStarted, committing/revealing in every auditor batch.
+    ///      6 approved models + 6 aggregators yield two Tier-1 batches.
+    function _advanceToT1(uint256 giIndex, uint256 nClients) internal {
+        address[6] memory clients = [client1, client2, client3, client4, client5, client6];
+        for (uint i = 0; i < nClients; i++) {
+            vm.prank(clients[i]); ta.submitLocalModel(bytes32((i + 1) * 100), giIndex);
+        }
 
         vm.startPrank(modelOwner);
         tc.closeLMsubmissions(giIndex);
@@ -195,22 +216,28 @@ contract LifecycleEventsTest is Test {
         tc.startLMsubmissionsEvaluation(giIndex);
         vm.stopPrank();
 
-        (, address[] memory batchAuditors, uint[] memory modelIdxs, ) = ta.getAuditorsBatch(giIndex, 0);
-        for (uint ai = 0; ai < batchAuditors.length; ai++) {
-            for (uint mi = 0; mi < modelIdxs.length; mi++) {
-                bytes32 ch = keccak256(abi.encodePacked(uint256(80), true, TEST_SALT));
-                vm.prank(batchAuditors[ai]);
-                ta.commitAuditScore(giIndex, 0, modelIdxs[mi], ch);
+        uint256 aBatches = ta.AuditorsBatchCount(giIndex);
+        for (uint ab = 0; ab < aBatches; ab++) {
+            (, address[] memory batchAuditors, uint[] memory modelIdxs, ) = ta.getAuditorsBatch(giIndex, ab);
+            for (uint ai = 0; ai < batchAuditors.length; ai++) {
+                for (uint mi = 0; mi < modelIdxs.length; mi++) {
+                    bytes32 ch = keccak256(abi.encodePacked(uint256(80), true, TEST_SALT));
+                    vm.prank(batchAuditors[ai]);
+                    ta.commitAuditScore(giIndex, ab, modelIdxs[mi], ch);
+                }
             }
         }
 
         vm.prank(modelOwner);
         tc.startLMsubmissionsEvaluationReveal(giIndex);
 
-        for (uint ai = 0; ai < batchAuditors.length; ai++) {
-            for (uint mi = 0; mi < modelIdxs.length; mi++) {
-                vm.prank(batchAuditors[ai]);
-                ta.revealAuditScore(giIndex, 0, modelIdxs[mi], 80, true, TEST_SALT);
+        for (uint ab = 0; ab < aBatches; ab++) {
+            (, address[] memory batchAuditors, uint[] memory modelIdxs, ) = ta.getAuditorsBatch(giIndex, ab);
+            for (uint ai = 0; ai < batchAuditors.length; ai++) {
+                for (uint mi = 0; mi < modelIdxs.length; mi++) {
+                    vm.prank(batchAuditors[ai]);
+                    ta.revealAuditScore(giIndex, ab, modelIdxs[mi], 80, true, TEST_SALT);
+                }
             }
         }
 
@@ -341,11 +368,15 @@ contract LifecycleEventsTest is Test {
 
     // ── T1BatchFinalized ──────────────────────────────────────────────────────
 
+    /// @dev Multi-batch GI: 6 approved models + 6 aggregators -> two Tier-1
+    ///      batches, so one event per batch is actually distinguishable from
+    ///      "emitted once" (a single-batch fixture can't tell them apart).
     function test_t1BatchFinalized_emittedPerBatch() public {
-        _setupToLMS(1, 10_000 ether);
-        _advanceToT1(1);
+        _setupToLMS(1, 10_000 ether, 6);
+        _advanceToT1(1, 6);
 
         uint256 t1Count = tc.tier1BatchCount(1);
+        assertEq(t1Count, 2, "fixture must produce two Tier-1 batches");
         for (uint b = 0; b < t1Count; b++) {
             (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, b);
             for (uint i = 0; i < t1aggs.length; i++) {
@@ -397,12 +428,52 @@ contract LifecycleEventsTest is Test {
     /// @dev Runs a full honest GI and asserts every state transition fires in
     ///      order with the correct GI index and state ordinal.
     function test_fullGI_GIStateChanged_sequence() public {
-        _setupToLMS(1, 10_000 ether);
+        // Setup inlined (not _setupToLMS) so GIstarted..LMSstarted are
+        // event-asserted too.
+        address[6] memory aggs = [agg1, agg2, agg3, agg4, agg5, agg6];
+        address[3] memory auds = [auditor1, auditor2, auditor3];
+        for (uint i = 0; i < aggs.length; i++) _fundAndStake(aggs[i]);
+        for (uint i = 0; i < auds.length; i++) _fundAndStake(auds[i]);
+        _fundDin(modelOwner, 10_000 ether);
+        vm.prank(modelOwner); ta.depositRewards(1, 10_000 ether);
 
-        // startGI already fired inside _setupToLMS — re-verify via recorded
-        // state rather than expectEmit (call already happened).
-        assertEq(tc.GI(), 1);
-        assertEq(uint8(tc.GIstate()), GI_LMS_STARTED);
+        // GIstarted — carries the new GI (1), not the previous one (0)
+        vm.expectEmit(true, true, false, false, address(tc));
+        emit DINTaskCoordinator.GIStateChanged(1, GI_STARTED);
+        vm.prank(modelOwner); tc.startGI(1);
+
+        // DINaggregatorsRegistrationStarted
+        vm.expectEmit(true, true, false, false, address(tc));
+        emit DINTaskCoordinator.GIStateChanged(1, GI_AGG_REG_STARTED);
+        vm.prank(modelOwner); tc.startDINaggregatorsRegistration(1);
+
+        for (uint i = 0; i < aggs.length; i++) {
+            vm.prank(aggs[i]); tc.registerDINaggregator(1);
+        }
+
+        // DINaggregatorsRegistrationClosed
+        vm.expectEmit(true, true, false, false, address(tc));
+        emit DINTaskCoordinator.GIStateChanged(1, GI_AGG_REG_CLOSED);
+        vm.prank(modelOwner); tc.closeDINaggregatorsRegistration(1);
+
+        // DINauditorsRegistrationStarted
+        vm.expectEmit(true, true, false, false, address(tc));
+        emit DINTaskCoordinator.GIStateChanged(1, GI_AUD_REG_STARTED);
+        vm.prank(modelOwner); tc.startDINauditorsRegistration(1);
+
+        for (uint i = 0; i < auds.length; i++) {
+            vm.prank(auds[i]); ta.registerDINAuditor(1);
+        }
+
+        // DINauditorsRegistrationClosed
+        vm.expectEmit(true, true, false, false, address(tc));
+        emit DINTaskCoordinator.GIStateChanged(1, GI_AUD_REG_CLOSED);
+        vm.prank(modelOwner); tc.closeDINauditorsRegistration(1);
+
+        // LMSstarted
+        vm.expectEmit(true, true, false, false, address(tc));
+        emit DINTaskCoordinator.GIStateChanged(1, GI_LMS_STARTED);
+        vm.prank(modelOwner); tc.startLMsubmissions(1);
 
         // LMSclosed
         vm.prank(client1); ta.submitLocalModel(bytes32(uint256(100)), 1);

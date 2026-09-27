@@ -2052,6 +2052,37 @@
     },
     {
       "type": "event",
+      "name": "LocalModelSubmitted",
+      "inputs": [
+        {
+          "name": "GI",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "modelIndex",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "client",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "modelCID",
+          "type": "bytes32",
+          "indexed": false,
+          "internalType": "bytes32"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
       "name": "OwnershipTransferred",
       "inputs": [
         {
