@@ -90,7 +90,9 @@ against foundry and needs live services; it isn't verification.
 - **ABIs** — for every contract under `foundry/src/` the merge changed (or
   that the merge-proposal comment says to regenerate), after the build:
   ```bash
-  dincli system dump-abi --artifact foundry/out/<C>.sol/<C>.json --output-dir dincli/abis
+  # torchenv has dincli importable but no `dincli` console script, so call the app directly
+  ~/my_venvs/torchenv/bin/python -c "import sys; from dincli.main import app; sys.argv=['dincli']+sys.argv[1:]; app()" \
+    system dump-abi --artifact foundry/out/<C>.sol/<C>.json --output dincli/abis
   ```
   Then `git diff --stat dincli/abis` — the delta should be exactly the ABI
   surface the PR added (new errors/events/functions, incl. inherited ones
