@@ -989,7 +989,7 @@ def din_info(ctx: typer.Context,
 #
 # NOTE — this is not the target architecture. The decision record
 # Documentation/technical/upgradable-contracts/proxy-deployment-architecture.md
-# chose native web3.py proxy deployment inside `dindao deploy` (its Option C;
+# chose native web3.py proxy deployment inside `dinrep deploy` (its Option C;
 # backlog: Developer/issues/dincli-native-proxy-deployment.md). Once that
 # lands, this command demotes to a secondary sync utility for script-driven
 # deployments/upgrades and for adopting already-deployed networks.
