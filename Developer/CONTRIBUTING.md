@@ -46,7 +46,7 @@ For issue-specific contributor packets, review questions, and curated reading li
   ```
   dincli system dump-abi --artifact foundry/out/<Contract>.sol/<Contract>.json --output dincli/abis --official
   ```
-  `dincli/abis/*.json` is the fallback ABI `DinContext` loads when a model's manifest doesn't supply custom `task_contracts` artifacts — a stale bundle means dincli silently calls functions/reads events that no longer match what's deployed. No network or wallet needed to run it. See [issue #177](https://github.com/InfiniteZeroFoundation/DevNet/issues/177) for what drifting looks like when this is skipped.
+  `dincli/abis/*.json` is the only ABI dincli has for the platform contracts (`DinCoordinator`, `DinToken`, `DinValidatorStake`, `DINModelRegistry`, `DinFeeRouter`), and the fallback for `DINTaskCoordinator`/`DINTaskAuditor` when a model's manifest doesn't supply custom `task_contracts` artifacts. A stale bundle means dincli calls functions that no longer exist (`AttributeError`) or decodes events/structs against the wrong layout. No network or wallet needed to run it. See [issue #177](https://github.com/InfiniteZeroFoundation/DevNet/issues/177) for what drifting looks like when this is skipped.
 
 ## Code Standards
 
