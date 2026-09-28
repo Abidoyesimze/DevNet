@@ -990,6 +990,72 @@ def build_and_send_tx(
 
         return None
     
+def ensure_batch_seed_locked(
+    ctx,
+    task_coordinator_contract,
+    gi: int,
+    seed_getter: str,
+    seed_block_getter: str,
+    lock_fn: str,
+    label: str,
+    poll_interval: float = 2.0,
+):
+    """issue #156 H-2: autoCreateTier1AndTier2 / createAuditorsBatches both
+    require their batch-assignment seed to already be locked -- an
+    ungrindable value anchored to a future block at the preceding GIstate
+    transition (closeLMsubmissionsEvaluation / closeLMsubmissions). Waits
+    for that block to be mined, then locks the seed. The lock is
+    permissionless: if someone else locks it first (or the seed block
+    re-anchors while we're waiting, e.g. because we were offline past the
+    256-block window), this just skips or re-polls rather than erroring.
+
+    seed_getter / seed_block_getter / lock_fn are the DINTaskCoordinator
+    function names for either seed pair -- aggSeed/aggSeedBlock/lockAggSeed
+    (T1/T2 batches) or auditSeed/auditSeedBlock/lockAuditSeed (auditor
+    batches). Same helper, different seed pair per caller.
+    """
+    effective_network, w3, account, console = ctx.obj.get_en_w3_account_console()
+
+    def _current_seed():
+        return getattr(task_coordinator_contract.functions, seed_getter)(gi).call()
+
+    if _current_seed() != b"\x00" * 32:
+        console.print(f"[dim]{label} seed already locked for GI {gi}[/dim]")
+        return
+
+    seed_block = getattr(task_coordinator_contract.functions, seed_block_getter)(gi).call()
+    console.print(
+        f"[cyan]Waiting for block {seed_block} to lock the {label} seed "
+        f"(current: {w3.eth.block_number})...[/cyan]"
+    )
+    while w3.eth.block_number <= seed_block:
+        time.sleep(poll_interval)
+
+    # A re-anchor (>256 blocks passed while we waited) or someone else's
+    # lock may have happened -- re-check rather than assume.
+    if _current_seed() != b"\x00" * 32:
+        console.print(f"[dim]{label} seed was locked by someone else while waiting[/dim]")
+        return
+
+    build_and_send_tx(
+        ctx,
+        getattr(task_coordinator_contract.functions, lock_fn)(gi),
+        f"Locking {label} seed",
+        f"{label.capitalize()} seed locked",
+        f"Failed to lock {label} seed",
+        exit_on_failure=True,
+    )
+
+    # The lock call itself re-anchors (rather than setting the seed) if
+    # >256 blocks elapsed since the last anchor -- recurse once to wait for
+    # the freshly-anchored block instead of proceeding with a zero seed.
+    if _current_seed() == b"\x00" * 32:
+        ensure_batch_seed_locked(
+            ctx, task_coordinator_contract, gi,
+            seed_getter, seed_block_getter, lock_fn, label, poll_interval,
+        )
+
+
 def print_tx_info(tx_hash, network=None, print_url = True):
     #ensure tx_hash is hex string
     if isinstance(tx_hash, bytes):

@@ -96,6 +96,44 @@
     },
     {
       "type": "function",
+      "name": "aggSeed",
+      "inputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "aggSeedBlock",
+      "inputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint64",
+          "internalType": "uint64"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "aggregatorWeight",
       "inputs": [
         {
@@ -114,6 +152,44 @@
           "name": "",
           "type": "uint256",
           "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "auditSeed",
+      "inputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "auditSeedBlock",
+      "inputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint64",
+          "internalType": "uint64"
         }
       ],
       "stateMutability": "view"
@@ -612,6 +688,32 @@
         }
       ],
       "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "lockAggSeed",
+      "inputs": [
+        {
+          "name": "_GI",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "lockAuditSeed",
+      "inputs": [
+        {
+          "name": "_GI",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
     },
     {
       "type": "function",
@@ -1578,6 +1680,44 @@
     },
     {
       "type": "event",
+      "name": "AggSeedLocked",
+      "inputs": [
+        {
+          "name": "GI",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "seed",
+          "type": "bytes32",
+          "indexed": false,
+          "internalType": "bytes32"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "AggSeedReanchored",
+      "inputs": [
+        {
+          "name": "GI",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "newSeedBlock",
+          "type": "uint64",
+          "indexed": false,
+          "internalType": "uint64"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
       "name": "AggregatorSlashed",
       "inputs": [
         {
@@ -1615,6 +1755,44 @@
           "type": "uint256",
           "indexed": false,
           "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "AuditSeedLocked",
+      "inputs": [
+        {
+          "name": "GI",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "seed",
+          "type": "bytes32",
+          "indexed": false,
+          "internalType": "bytes32"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "AuditSeedReanchored",
+      "inputs": [
+        {
+          "name": "GI",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "newSeedBlock",
+          "type": "uint64",
+          "indexed": false,
+          "internalType": "uint64"
         }
       ],
       "anonymous": false
@@ -2115,6 +2293,26 @@
     },
     {
       "type": "error",
+      "name": "TC_AggSeedAlreadyLocked",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_AggSeedBlockNotMined",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_AggSeedNotAnchored",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_AggSeedNotLocked",
+      "inputs": []
+    },
+    {
+      "type": "error",
       "name": "TC_AggregatorAlreadyRegistered",
       "inputs": []
     },
@@ -2141,6 +2339,26 @@
     {
       "type": "error",
       "name": "TC_AlreadySubmitted",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_AuditSeedAlreadyLocked",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_AuditSeedBlockNotMined",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_AuditSeedNotAnchored",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_AuditSeedNotLocked",
       "inputs": []
     },
     {
