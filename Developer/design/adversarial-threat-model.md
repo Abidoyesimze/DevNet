@@ -2,7 +2,7 @@
 
 **Status:** Draft — revised after verification review of PR #182  
 **Date:** 2026-09-28 (revised 2026-09-28)  
-**Base:** `develop` @ post-PR-#171/#172/#173 (tip 37b2daf)  
+**Base:** `develop` @ `1e049e9` (`foundry/src` unchanged since post-PR-#171/#172/#173)  
 **Author:** @robertocarlous
 
 This is a targeted threat model for the DIN Protocol on-chain coordination layer.
@@ -69,8 +69,8 @@ entry in `foundry/test/P3Adversarial.t.sol`.
 | **Attacker** | Majority of T1 aggregators in a batch (no auditor collusion needed) |
 | **Capability** | Controls ≥ `T1_AGGREGATORS_PER_BATCH / 2 + 1` keys in one batch; submits a wrong CID |
 | **Protocol response today** | The wrong CID wins the majority vote and is finalized. The honest dissenter who submitted the correct CID is slashed for `AGG_T1_BAD_CONSENSUS` (full `minStake` via `slash()`, `DINTaskCoordinator.sol:971`). S4 dispute (`openDispute` → `lockDisputeSeed` → `resolveDispute(upheld=true)` → `settleRecomputation`) is the only remedy. Adjudication is `onlyOwner` (`DINTaskCoordinator.sol:1277`, `DINTaskCoordinator.sol:1351`). When `settleRecomputation(confirmed=true)` is called: the challenger's bond is returned and the original colluding aggregators are slashed `S4_INVALID_AGGREGATION` — but **`finalCID` is not replaced and the honest dissenter's `AGG_T1_BAD_CONSENSUS` slash is not refunded**. The wrong CID remains the global model for that GI. `_assignFreshSubgroup` is bookkeeping only and does not re-run aggregation. |
-| **Expected test outcome** | **⚠ JUDGMENT CALL — flagged for Umer review.** The wrong CID persists even after an upheld S4 dispute, and the honest dissenter's stake is not recovered. Two options: (a) **KNOWN GAP** — the attack partially succeeds (wrong model propagates, dissenter loses stake) even under TA-1. (b) **COST-BOUNDED** — colluders are slashed, attacker's net benefit = permanent wrong model − minStake × majority-count. Proposed: KNOWN GAP, since damage is not repaired by the available mechanism. |
-| **Trust assumption** | "Owner is honest adjudicator (S4, pre-decentralization)" — see trust-assumptions section. |
+| **Expected test outcome** | **KNOWN GAP** (tracking issue needed, see gaps-before-audit) — the attack partially succeeds even under TA-1: the wrong CID persists after an upheld S4 dispute and the honest dissenter's stake is not recovered. `test_knownGap_t1WrongCID` runs the full S4 flow (`openDispute` → `lockDisputeSeed` → `resolveDispute(upheld=true)` → `settleRecomputation(confirmed=true)`) and asserts: the colluders are slashed `S4_INVALID_AGGREGATION` and the challenger's bond is claimable; the batch's `finalCID` is unchanged; the dissenter's `AGG_T1_BAD_CONSENSUS` slash is not refunded. Flips to `test_defended_` once `settleRecomputation(confirmed=true)` repairs both. |
+| **Trust assumption** | Even TA-1 (owner is honest adjudicator) does not defend this row: the damage is not repaired by an honest owner either. A dishonest owner is the separate Row 7 gap. |
 
 ---
 
@@ -105,7 +105,7 @@ entry in `foundry/test/P3Adversarial.t.sol`.
 | **Attacker** | Model owner trying to steer which validators are drawn for the fresh subgroup in `settleRecomputation` |
 | **Capability** | Owner controls when to call `lockDisputeSeed` and `resolveDispute`; sees exactly which fresh subgroup is drawn before calling `resolveDispute(upheld=true)` |
 | **Protocol response today** | PR #171 (`lockDisputeSeed`): after `openDispute`, `seedBlock = block.number + disputeSeedDelay` (default: 7 blocks, `DINTaskCoordinator.sol:151`). Anyone can call `lockDisputeSeed` once past `seedBlock`; it reads `blockhash(d.seedBlock)`. The seed is used by `_assignFreshSubgroup` to draw from the registered pool. Re-locking after an expired seed-window re-anchors to a new future block. **Trust caveat (TA-4):** OP Stack blockhash is sequencer-produced. The contract's own NatSpec (`DINTaskCoordinator.sol:147-150`) explicitly says this design "trusts the sequencer not to grind". Additionally, because `lockDisputeSeed` must be called before `resolveDispute(upheld=true)`, the owner can see exactly which fresh subgroup would be drawn **before deciding to uphold**. Subgroup-draw steering is defended; outcome steering is not (covered by Row 7). |
-| **Expected test outcome** | **DEFENDED** (subgroup draw only) — the test advances 8 blocks, calls `lockDisputeSeed`, and asserts `_assignFreshSubgroup` draws a deterministic set. Attempting to re-lock before seed expiry reverts. After seed-window expiry, a re-lock anchors on a new block. |
+| **Expected test outcome** | **DEFENDED** (subgroup draw only) — the test advances 8 blocks, calls `lockDisputeSeed`, and asserts the fresh subgroup drawn by `resolveDispute(upheld=true)` (read via `reEvaluationAssignees` / the `ReEvaluationAssigned` event, since `_assignFreshSubgroup` is `internal`) is deterministic for the locked seed. Attempting to re-lock before seed expiry reverts. After seed-window expiry, a re-lock anchors on a new block. |
 | **Trust assumption** | TA-4: "OP Stack sequencer does not grind `blockhash(seedBlock)` — sufficient for testnet." ([#178](https://github.com/InfiniteZeroFoundation/DevNet/issues/178) tracks upgrade to VRF for mainnet.) |
 
 ---
@@ -150,7 +150,7 @@ entry in `foundry/test/P3Adversarial.t.sol`.
 
 | ID | Assumption | DEFENDED rows that rely on it |
 |---|---|---|
-| TA-1 | **Owner is honest adjudicator (S4, pre-decentralization).** `resolveDispute` and `settleRecomputation` are `onlyOwner`; no on-chain appeal exists. | Row 5 (judgment call), Row 8 (subgroup draw only) |
+| TA-1 | **Owner is honest adjudicator (S4, pre-decentralization).** `resolveDispute` and `settleRecomputation` are `onlyOwner`; no on-chain appeal exists. | Row 8 (subgroup draw only) |
 | TA-2 | **S5 recidivism counter is correctly implemented and called.** `slashPartial` is the only path; each task contract must use it (not `slash()`) for liveness faults. | Row 3 |
 | TA-3 | **MIN_STAKE and batch-size/validator-ratio calibration.** The cost to capture majority seats must be economically prohibitive relative to model rewards. | Rows 1, 2 |
 | TA-4 | **OP Stack sequencer does not grind `blockhash(seedBlock)`.** Sufficient for testnet; mainnet requires VRF upgrade (#178). | Row 8 |
@@ -163,8 +163,8 @@ entry in `foundry/test/P3Adversarial.t.sol`.
 | Gap | Tracking issue | Scenario | Condition to flip |
 |---|---|---|---|
 | S3 graduating from shadow mode | [#38](https://github.com/InfiniteZeroFoundation/DevNet/issues/38) | Row 4 (auditor bloc poisoned model) | `s3SlashingEnabled` set to `true` after threshold calibration |
-| T1 wrong CID — finalCID not replaced, dissenter not refunded | [#181](https://github.com/InfiniteZeroFoundation/DevNet/issues/181) or new issue | Row 5 (T1 wrong CID) | `settleRecomputation(confirmed=true)` replaces `finalCID` and refunds the honest dissenter |
-| Dual-role registration guard | [#180](https://github.com/InfiniteZeroFoundation/DevNet/issues/180) | Row 6 (cross-role + owner block-selection) | Decision on whether dual-role is intentional; guard or stake-cost documentation added |
+| T1 wrong CID — finalCID not replaced, dissenter not refunded | (new issue needed; #181 covers who adjudicates, not repairing the outcome) | Row 5 (T1 wrong CID) | `settleRecomputation(confirmed=true)` replaces `finalCID` and refunds the honest dissenter |
+| Dual-role registration guard | [#180](https://github.com/InfiniteZeroFoundation/DevNet/issues/180) | Row 6 (cross-role + owner block-selection) | Per-address role-separation guard added, or the stake cost documented as the intended defence (with a non-zero concurrent-registration cap) |
 | Stronger batch-shuffle seed | [#156](https://github.com/InfiniteZeroFoundation/DevNet/issues/156) | Row 6 (owner block-selection) | `_shuffleAddressArray` seeded post-registration rather than at owner-controlled call time |
 | Decentralized dispute adjudication | [#181](https://github.com/InfiniteZeroFoundation/DevNet/issues/181) | Row 7 (owner suppresses dispute) and bond-locked-forever variant | `resolveDispute` gated by multi-sig, DAO committee, or fraud-proof; timeout added for unresolved disputes |
 | Dispute timeout for unresolved disputes | [#181](https://github.com/InfiniteZeroFoundation/DevNet/issues/181) | Row 7 (owner never resolves → bond locked) | `expireDispute` (or a new function) reachable when `d.resolved == false` after a deadline |
@@ -174,10 +174,10 @@ entry in `foundry/test/P3Adversarial.t.sol`.
 
 ---
 
-## Judgment calls flagged for Umer review
+## Judgment calls (decided)
 
-1. **Row 5 — T1 wrong CID: KNOWN GAP or COST-BOUNDED?**
-   `settleRecomputation(confirmed=true)` does not replace `finalCID` and does not refund the honest dissenter's `AGG_T1_BAD_CONSENSUS` slash. The wrong CID stays the global model even after an upheld S4 dispute. Proposed: **KNOWN GAP** — the attack partially succeeds (wrong model propagates, dissenter out minStake) regardless of TA-1. If Umer prefers COST-BOUNDED (attackers slashed, net cost asserted), the test becomes `test_costBounded_t1WrongCID`.
+1. **Row 5 — T1 wrong CID: KNOWN GAP.**
+   `settleRecomputation(confirmed=true)` does not replace `finalCID` and does not refund the honest dissenter's `AGG_T1_BAD_CONSENSUS` slash, so the attack partially succeeds regardless of TA-1. COST-BOUNDED was rejected because it would pass a test while the honest dissenter is never made whole. Test: `test_knownGap_t1WrongCID`.
 
-2. **Row 6 — Dual-role registration: intended or gap?**
-   A per-address cross-role guard is Sybil-bypassable; stake cost may be the only practical defence regardless. If intentional, close #180, update row to COST-BOUNDED, and document the stake-cost trust assumption.
+2. **Row 6 — Dual-role registration: KNOWN GAP.**
+   Not accepted as intended; [#180](https://github.com/InfiniteZeroFoundation/DevNet/issues/180) stays open. A per-address cross-role guard is Sybil-bypassable (a second address with its own stake), so #180 decides between adding the guard and documenting the stake cost as the defence. The concurrent-registration cap only bounds that cost when it is non-zero.
