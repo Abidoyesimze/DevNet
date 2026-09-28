@@ -77,8 +77,14 @@ class DummySweepable:
 
 
 class DummyRouterFunctions:
-    def __init__(self, split):
+    def __init__(self, split, fee_sources, fee_source_calls):
         self._split = split
+        self._fee_sources = fee_sources
+        self._fee_source_calls = fee_source_calls
+
+    def feeSources(self, address):
+        self._fee_source_calls.append(address)
+        return DummyCall(address in self._fee_sources)
 
     def ethSplit(self):
         return DummyCall(self._split)
@@ -118,7 +124,9 @@ def harness(monkeypatch):
     prompts = []
     router_loads = []
     state = SimpleNamespace(sent=sent, prompts=prompts, router_loads=router_loads, confirm=True,
-                            split=(9500, 500, 0, 0))
+                            split=(9500, 500, 0, 0),
+                            # Router has authorised both dummy contracts unless a test removes one.
+                            fee_sources={"0xRegistry", "0xCoordinator"}, fee_source_calls=[])
 
     def fake_build_and_send_tx(*args, **kwargs):
         sent.append(args)
@@ -126,7 +134,9 @@ def harness(monkeypatch):
 
     def fake_get_contract_instance(artifact_path, network, address=None):
         router_loads.append((artifact_path, network, address))
-        return SimpleNamespace(functions=DummyRouterFunctions(state.split))
+        return SimpleNamespace(
+            functions=DummyRouterFunctions(state.split, state.fee_sources, state.fee_source_calls)
+        )
 
     def fake_confirm(text, *args, **kwargs):
         prompts.append(text)
@@ -165,6 +175,27 @@ def test_sweep_exits_when_fee_router_unset(harness, command, target, name):
     assert exc.value.exit_code == 1
     assert harness.sent == []
     assert "DeployPlatform.s.sol" in ctx.obj.console.text()
+
+
+@pytest.mark.parametrize("command, target, name", TARGETS)
+def test_sweep_exits_when_not_a_fee_source(harness, command, target, name):
+    ctx = make_ctx()
+    target_address = getattr(ctx.obj, target).address
+    harness.fee_sources.discard(target_address)
+
+    with pytest.raises(typer.Exit) as exc:
+        command(ctx, yes=False)
+
+    assert exc.value.exit_code == 1
+    assert harness.sent == []
+    assert harness.prompts == []
+    # The router was asked about exactly the contract being swept.
+    assert harness.fee_source_calls == [target_address]
+    out = ctx.obj.console.text()
+    assert "not an authorised fee source" in out
+    assert f"addFeeSource({target_address})" in out
+    # Fails before the preview, not after it.
+    assert "Treasury (" not in out
 
 
 @pytest.mark.parametrize("command, target, name", TARGETS)
@@ -218,6 +249,8 @@ def test_sweep_yes_skips_prompt_and_previews_split(harness, command, target, nam
     artifact_path, _, address = harness.router_loads[0]
     assert artifact_path.endswith("DinFeeRouter.json")
     assert address == ROUTER
+    # The fee-source check asked about the swept contract, and passed.
+    assert harness.fee_source_calls == [getattr(ctx.obj, target).address]
     out = ctx.obj.console.text()
     assert f"Treasury ({TREASURY}): 0.05 ETH" in out
     assert "Validator pool: 0.95 ETH" in out

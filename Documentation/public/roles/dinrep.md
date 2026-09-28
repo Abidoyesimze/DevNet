@@ -160,6 +160,7 @@ dincli dinrep coordinator sweep-fees
 
 - **Owner only:** the active wallet must be the contract's owner, i.e. the DIN-Representative wallet.
 - **Router wiring:** `foundry/script/DeployPlatform.s.sol` connects both contracts to the fee router when it deploys them. The CLI has no command for changing the router.
+- **Fee-source check:** the router only accepts sweeps from contracts it has authorised as fee sources. The deploy script authorises both. The command checks this before the preview. If the contract has since been removed with `removeFeeSource`, the DinFeeRouter owner must call `addFeeSource(<contract address>)` again; dincli has no command for that yet.
 - **Preview and confirmation:** each command reads the router's current `ethSplit`, shows how much will go to each bucket, and asks before sending. Pass `--yes` to skip the prompt.
 - **One sweep moves the whole balance.**
 
