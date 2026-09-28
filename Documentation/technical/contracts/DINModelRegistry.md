@@ -244,7 +244,7 @@ function initialize(address dinValidatorStake_) external initializer
 
 ### 8.2 Deployment position and wiring
 
-From [`foundry/script/DeployPlatform.s.sol`](../../../foundry/script/DeployPlatform.s.sol), the registry comes after `DinValidatorStake`, because `initialize` needs the stake proxy address, and is then wired into the fee router:
+From `foundry/script/DeployPlatform.s.sol` (see [DeployPlatform](foundry/script/DeployPlatform.md)), the registry comes after `DinValidatorStake`, because `initialize` needs the stake proxy address, and is then wired into the fee router:
 
 ```
 7.  DinValidatorStake proxy   initialize(dinToken, dinCoordinator)
@@ -263,7 +263,7 @@ A model registration can only succeed after its task contracts have been authori
 | Contract owner (`owner()`) | `initialize` caller (DIN-Representative) | All approval, kill-switch, fee, and fee-routing functions |
 | Proxy admin (`ProxyAdmin` contract) | One per proxy (OZ v5), created at proxy deployment and owned by the deployer | Swapping the implementation |
 
-- **Upgrade path:** `cd foundry && CONTRACT=DINModelRegistry forge script script/UpgradePlatform.s.sol --rpc-url <rpc> --broadcast ...` (reads the proxy address from `foundry/deployments/localhost.json`; see [`foundry/script/UpgradePlatform.s.sol`](../../../foundry/script/UpgradePlatform.s.sol)).
+- **Upgrade path:** `cd foundry && CONTRACT=DINModelRegistry forge script script/UpgradePlatform.s.sol --rpc-url <rpc> --broadcast ...` (reads the proxy address from `foundry/deployments/<network>.json`; see [UpgradePlatform](foundry/script/UpgradePlatform.md)).
 - **Storage-layout safety:** state may only be appended; the `__gap` array reserves 50 slots. `foundry/test/UpgradeValidation.t.sol` runs `Upgrades.validateImplementation`, and `DINModelRegistryUpgradeTest` in `foundry/test/DeployPlatform.t.sol` upgrades to `foundry/src/upgrade/DINModelRegistryV2.sol` and checks fees, models and pending requests survive.
 - **Trust implication:** the registry's guarantees (approval gating, fee levels, kill-switch state) hold only as long as the ProxyAdmin owner is honest.
 
