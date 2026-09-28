@@ -129,6 +129,8 @@ Compare this to `DINTaskAuditor`, which explicitly enforces `minEligibilityQuoru
 
 ### H-2. Predictable, grindable pseudo-randomness in auditor/aggregator batch shuffling enables collusion
 
+**Fixed — dispute-outcome seed: [PR #171](https://github.com/InfiniteZeroFoundation/DevNet/pull/171) (BL-11). Batch-assignment seed (`createAuditorsBatches`/`autoCreateTier1AndTier2`, described below): [PR #XXX](https://github.com/InfiniteZeroFoundation/DevNet/pull/XXX).** Both shuffle call sites now consume a future-block-anchored, permissionlessly-lockable seed (`lockAuditSeed`/`lockAggSeed` in `DINTaskCoordinator`) instead of `blockhash`/`block.timestamp`/`msg.sender` — the caller can no longer compute the shuffle before choosing whether/when to submit, since the seed is fixed at a block that hasn't been mined yet when it's anchored. See `foundry/test/SecurityFindings.t.sol`'s `test_createAuditorsBatches_timingIndependent` / `test_autoCreateTier1AndTier2_timingIndependent` for the PoC that the shuffle outcome no longer depends on when the batch-creation call is submitted.
+
 **Contracts / functions:**
 - `DINTaskAuditor.sol`: `_shuffleAddressArray()` (L263-273), `_shuffleUintArray()` (L299-308), both used by `createAuditorsBatches()`
 - `DINTaskCoordinator.sol`: `_shuffleAddressArray()` (L379-389), `_shuffleUintArray()` (L391-400), both used by `autoCreateTier1AndTier2()`
