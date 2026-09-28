@@ -56,13 +56,13 @@ Model registration follows a **request → approval** flow. Model Owners submit 
 **List pending registration requests:**
 
 ```bash
-dincli dinrep registry list-requests [--pending]
+dincli dinrep registry list-pending-requests [--type model|manifest]
 ```
 
 **Approve a model registration request:**
 
 ```bash
-dincli dinrep registry approve-model <requestId>
+dincli dinrep registry approve-registration-request <requestId>
 ```
 
 > [!IMPORTANT]
@@ -71,7 +71,7 @@ dincli dinrep registry approve-model <requestId>
 **Reject a model registration request:**
 
 ```bash
-dincli dinrep registry reject-model <requestId>
+dincli dinrep registry reject-registration-request <requestId>
 ```
 
 The registration fee is retained by the contract in both cases.
@@ -130,26 +130,20 @@ The registry charges fees for model registration and manifest update requests. A
 **Update a single fee:**
 
 ```bash
-dincli dinrep registry set-fee --open-source-fee <wei>
-dincli dinrep registry set-fee --proprietary-fee <wei>
-dincli dinrep registry set-fee --open-source-update-fee <wei>
-dincli dinrep registry set-fee --proprietary-update-fee <wei>
+dincli dinrep registry set-open-source-fee <eth>
+dincli dinrep registry set-proprietary-fee <eth>
+dincli dinrep registry set-open-source-update-fee <eth>
+dincli dinrep registry set-proprietary-update-fee <eth>
 ```
 
 **Update all fees atomically (preferred for governance proposals):**
 
 ```bash
 dincli dinrep registry set-fees \
-  --open-source-fee <wei> \
-  --proprietary-fee <wei> \
-  --open-source-update-fee <wei> \
-  --proprietary-update-fee <wei>
-```
-
-**Withdraw accumulated fees:**
-
-```bash
-dincli dinrep registry withdraw-fees --to <address>
+  --open-source <eth> \
+  --proprietary <eth> \
+  --open-source-update <eth> \
+  --proprietary-update <eth>
 ```
 
 ---
@@ -187,19 +181,6 @@ If you already know the contract address, you can pass it explicitly instead of 
 ```bash
 dincli dinrep add-slasher --contract <contract_address>
 ```
-
----
-
-## 5. DAO Admin Transfer
-
-The DAO admin role can be transferred to a multisig or on-chain timelock without redeploying the registry.
-
-```bash
-dincli dinrep registry set-admin <new_admin_address>
-```
-
-> [!CAUTION]
-> This action is irreversible from the old admin address. Confirm the new address is correct before proceeding.
 
 ---
 
