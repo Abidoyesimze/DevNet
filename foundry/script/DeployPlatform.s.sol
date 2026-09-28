@@ -13,11 +13,25 @@ import {DinTreasury} from "../src/DinTreasury.sol";
 import {DinFeeRouter} from "../src/DinFeeRouter.sol";
 import {DinEmission} from "../src/DinEmission.sol";
 
-/// @notice Deploys the seven DIN platform contracts behind Transparent Proxies
-///         on a local anvil chain, wires them together, and writes
-///         foundry/deployments/localhost.json in the same schema as
-///         hardhat/deployments/localhost.json so dincli import-deployments
-///         accepts it without modification.
+/// @notice Deploys the seven DIN platform contracts behind Transparent Proxies,
+///         wires them together, and writes foundry/deployments/localhost.json.
+///
+/// Tokenomics parameters are read from the environment via vm.envOr, defaulting
+/// to today's in-code values so local deploys and existing tests are unchanged.
+/// Override any of these keys in your .env.<network> file for testnet/mainnet.
+///
+/// Env keys (see .env.example for full descriptions):
+///   DIN_PER_ETH                 — DIN minted per ETH (default: 1_000_000 * 1e18)
+///   MINT_CAP                    — max total DIN minted, 0 = uncapped (default: 0)
+///   EMISSION_PER_GI             — initial DIN per GI (default: 100e18)
+///   EMISSION_DECAY_BPS          — retention fraction bps per epoch (default: 8000)
+///   EMISSION_EPOCH_LENGTH       — GIs per epoch (default: 100)
+///   EMISSION_MAX_EPOCHS         — total epochs before emission stops (default: 10)
+///   MIN_STAKE                   — minimum validator stake in DIN-wei (default: 10e18)
+///   S5_RECIDIVISM_WINDOW        — rolling GI window for S5 escalation (default: 5)
+///   S5_RECIDIVISM_THRESHOLD     — slashes in window to trigger S5 jail (default: 3)
+///   S5_JAIL_DURATION            — jail duration in seconds (default: 604800 = 7 days)
+///   S6_NO_PARTICIPATION_THRESHOLD — no-participation events before S6 fires (default: 3)
 ///
 /// Usage (from repo root):
 ///   ./foundry/anvil.sh &
@@ -33,7 +47,40 @@ import {DinEmission} from "../src/DinEmission.sol";
 contract DeployPlatform is Script {
     using stdJson for string;
 
+    // ── Tokenomics defaults (match contract initialize values) ────────────────
+    uint256 internal constant DEFAULT_DIN_PER_ETH        = 1_000_000 * 1e18;
+    uint256 internal constant DEFAULT_MINT_CAP           = 0;
+    uint256 internal constant DEFAULT_EMISSION_PER_GI    = 100e18;
+    uint256 internal constant DEFAULT_EMISSION_DECAY_BPS = 8000;
+    uint256 internal constant DEFAULT_EMISSION_EPOCH_LEN = 100;
+    uint256 internal constant DEFAULT_EMISSION_MAX_EPOCHS= 10;
+    uint256 internal constant DEFAULT_MIN_STAKE          = 10 * 1e18;
+    uint256 internal constant DEFAULT_S5_WINDOW          = 5;
+    uint256 internal constant DEFAULT_S5_THRESHOLD       = 3;
+    uint256 internal constant DEFAULT_S5_JAIL_DURATION   = 7 days;
+    uint256 internal constant DEFAULT_S6_THRESHOLD       = 3;
+
     function run() external {
+        // ── Read overrides from environment ────────────────────────────────
+        uint256 dinPerEth        = vm.envOr("DIN_PER_ETH",                  DEFAULT_DIN_PER_ETH);
+        uint256 mintCap          = vm.envOr("MINT_CAP",                     DEFAULT_MINT_CAP);
+        uint256 emissionPerGI    = vm.envOr("EMISSION_PER_GI",              DEFAULT_EMISSION_PER_GI);
+        uint256 emissionDecayBps = vm.envOr("EMISSION_DECAY_BPS",           DEFAULT_EMISSION_DECAY_BPS);
+        uint256 emissionEpochLen = vm.envOr("EMISSION_EPOCH_LENGTH",        DEFAULT_EMISSION_EPOCH_LEN);
+        uint256 emissionMaxEpochs= vm.envOr("EMISSION_MAX_EPOCHS",          DEFAULT_EMISSION_MAX_EPOCHS);
+        uint256 minStake         = vm.envOr("MIN_STAKE",                    DEFAULT_MIN_STAKE);
+        uint256 s5Window         = vm.envOr("S5_RECIDIVISM_WINDOW",         DEFAULT_S5_WINDOW);
+        uint256 s5Threshold      = vm.envOr("S5_RECIDIVISM_THRESHOLD",      DEFAULT_S5_THRESHOLD);
+        uint256 s5JailDuration   = vm.envOr("S5_JAIL_DURATION",             DEFAULT_S5_JAIL_DURATION);
+        uint256 s6Threshold      = vm.envOr("S6_NO_PARTICIPATION_THRESHOLD",DEFAULT_S6_THRESHOLD);
+
+        if (dinPerEth == DEFAULT_DIN_PER_ETH)
+            console.log("[INFO] DIN_PER_ETH not set - using default:", dinPerEth);
+        if (mintCap == DEFAULT_MINT_CAP)
+            console.log("[INFO] MINT_CAP not set - using default (uncapped)");
+        if (minStake == DEFAULT_MIN_STAKE)
+            console.log("[INFO] MIN_STAKE not set - using default:", minStake);
+
         vm.startBroadcast();
 
         // 1. DinTreasury — no dependencies
@@ -118,8 +165,8 @@ contract DeployPlatform is Script {
         DINModelRegistry(dinModelRegistryProxy).setFeeRouter(dinFeeRouterProxy);
         console.log("DINModelRegistry feeRouter wired");
 
-        // 13. DinEmission — default schedule: 100 DIN/GI, 80% decay/epoch,
-        //     100 GIs/epoch, 10 epochs. All params are DAO-settable post-deploy.
+        // 13. DinEmission — schedule from env overrides (defaults: 100 DIN/GI,
+        //     8000 bps retention per epoch, 100 GIs/epoch, 10 epochs).
         address dinEmissionProxy = Upgrades.deployTransparentProxy(
             "DinEmission.sol:DinEmission",
             msg.sender,
@@ -128,10 +175,10 @@ contract DeployPlatform is Script {
                 (
                     dinCoordinatorProxy,
                     dinTokenProxy,
-                    100e18,   // initialEmissionPerGI: 100 DIN
-                    8000,     // decayBps: 80% retained per epoch
-                    100,      // epochLength: 100 GIs per epoch
-                    10        // maxEpochs: 10 epochs then emission stops
+                    emissionPerGI,
+                    emissionDecayBps,
+                    emissionEpochLen,
+                    emissionMaxEpochs
                 )
             )
         );
@@ -140,6 +187,47 @@ contract DeployPlatform is Script {
         // 14. Wire DinCoordinator → DinEmission
         DinCoordinator(payable(dinCoordinatorProxy)).setEmissionContract(dinEmissionProxy);
         console.log("DinCoordinator emission contract wired");
+
+        // 15. Apply post-deploy tokenomics overrides when they differ from defaults.
+        if (dinPerEth != DEFAULT_DIN_PER_ETH) {
+            DinCoordinator(payable(dinCoordinatorProxy)).updateDinPerEth(dinPerEth);
+            console.log("DinCoordinator.dinPerEth set to:", dinPerEth);
+        }
+        if (mintCap != DEFAULT_MINT_CAP) {
+            DinCoordinator(payable(dinCoordinatorProxy)).setMintCap(mintCap);
+            console.log("DinCoordinator.mintCap set to:", mintCap);
+        }
+        if (minStake != DEFAULT_MIN_STAKE) {
+            DinValidatorStake(dinValidatorStakeProxy).setMinStake(minStake);
+            console.log("DinValidatorStake.minStake set to:", minStake);
+        }
+        if (
+            s5Window     != DEFAULT_S5_WINDOW     ||
+            s5Threshold  != DEFAULT_S5_THRESHOLD  ||
+            s5JailDuration != DEFAULT_S5_JAIL_DURATION
+        ) {
+            DinValidatorStake(dinValidatorStakeProxy).setS5RecidivismParams(
+                s5Window, s5Threshold, s5JailDuration
+            );
+            console.log("DinValidatorStake S5 params updated");
+        }
+        if (s6Threshold != DEFAULT_S6_THRESHOLD) {
+            DinValidatorStake(dinValidatorStakeProxy).setS6NoParticipationThreshold(s6Threshold);
+            console.log("DinValidatorStake.s6NoParticipationThreshold set to:", s6Threshold);
+        }
+
+        console.log("--- Effective tokenomics ---");
+        console.log("dinPerEth:            ", dinPerEth);
+        console.log("mintCap:              ", mintCap);
+        console.log("emissionPerGI:        ", emissionPerGI);
+        console.log("emissionDecayBps:     ", emissionDecayBps);
+        console.log("emissionEpochLength:  ", emissionEpochLen);
+        console.log("emissionMaxEpochs:    ", emissionMaxEpochs);
+        console.log("minStake:             ", minStake);
+        console.log("s5Window:             ", s5Window);
+        console.log("s5Threshold:          ", s5Threshold);
+        console.log("s5JailDuration:       ", s5JailDuration);
+        console.log("s6Threshold:          ", s6Threshold);
 
         // ProxyAdmin — OZ v5 deploys one ProxyAdmin per proxy; record all seven
         address proxyAdminTreasury    = Upgrades.getAdminAddress(dinTreasuryProxy);

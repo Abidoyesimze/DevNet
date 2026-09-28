@@ -205,7 +205,7 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
     ///      flat-minStake behavior.
     /// @param bps New fraction in basis points (0–10000).
     function setS1SlashFractionBps(uint256 bps) external onlyOwner {
-        if (bps > 10_000) revert TA_InvalidSlashFraction();
+        if (bps == 0 || bps > 10_000) revert TA_InvalidSlashFraction();
         uint256 old = s1SlashFractionBps;
         s1SlashFractionBps = bps;
         emit S1SlashFractionBpsUpdated(old, bps);
@@ -1346,12 +1346,16 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
 
                 if (missedVote) {
                     // S1: partial slash via slashPartial (tracks S5 recidivism).
-                    uint256 actualSlashed = dinvalidatorStakeContract.slashPartial(
-                        auditor,
-                        s1Amount,
-                        "AUD_NO_VOTE",
-                        _GI
-                    );
+                    // Skip when rounding reduces s1Amount to 0 — slashPartial
+                    // reverts InvalidSlashAmount on zero, bricking the GI.
+                    uint256 actualSlashed = s1Amount > 0
+                        ? dinvalidatorStakeContract.slashPartial(
+                            auditor,
+                            s1Amount,
+                            "AUD_NO_VOTE",
+                            _GI
+                        )
+                        : 0;
                     emit AuditorSlashed(
                         _GI,
                         b,
