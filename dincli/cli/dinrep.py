@@ -398,33 +398,6 @@ def set_fees(
         "Failed to update all fees"
     )
 
-@registry_app.command("withdraw-fees")
-def withdraw_fees(ctx: typer.Context, to: str = typer.Argument(..., help="Address to withdraw fees to")):
-    effective_network, w3, account, console = ctx.obj.get_en_w3_account_console()
-    DINModelRegistry_Contract = ctx.obj.get_deployed_din_registry_contract()
-    target_address = w3.to_checksum_address(to)
-    build_and_send_tx(
-        ctx, 
-        DINModelRegistry_Contract.functions.withdrawFees(target_address),
-        f"Withdrawing fees to {target_address}",
-        "Fees withdrawn successfully",
-        "Failed to withdraw fees"
-    )
-
-@registry_app.command("set-dao-admin")
-def set_dao_admin(ctx: typer.Context, new_admin: str = typer.Argument(..., help="New DAO admin address")):
-    effective_network, w3, account, console = ctx.obj.get_en_w3_account_console()
-    DINModelRegistry_Contract = ctx.obj.get_deployed_din_registry_contract()
-    target_address = w3.to_checksum_address(new_admin)
-    build_and_send_tx(
-        ctx, 
-        DINModelRegistry_Contract.functions.setDAOAdmin(target_address),
-        f"Setting DAO admin to {target_address}",
-        "DAO admin set successfully",
-        "Failed to set DAO admin"
-    )
-
-
 @registry_app.command("list-pending-requests")
 def list_pending_requests(ctx: typer.Context, req_type: str = typer.Option(None, "--type", "-t", help="Type of request: 'model' or 'manifest'")):
     """Get all unprocessed Model and ManifestUpdate requests."""
