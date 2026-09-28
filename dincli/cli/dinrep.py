@@ -1,5 +1,6 @@
 import os
 import time
+from importlib.resources import files
 
 import typer
 
@@ -11,9 +12,11 @@ app = typer.Typer(help="Commands for the DIN-Representative")
 
 registry_app = typer.Typer(help="Registry sub-app (for 'dincli dinrep registry to interact with DINRegistry ...')")
 deploy_app = typer.Typer(help="Deploy DIN smart contracts")
+coordinator_app = typer.Typer(help="Coordinator sub-app ('dincli dinrep coordinator ...') to interact with DinCoordinator")
 
 app.add_typer(deploy_app, name="deploy")
 app.add_typer(registry_app, name="registry")
+app.add_typer(coordinator_app, name="coordinator")
 
 
 def _request_status(processed: bool, approved: bool) -> str:
@@ -398,31 +401,88 @@ def set_fees(
         "Failed to update all fees"
     )
 
-@registry_app.command("withdraw-fees")
-def withdraw_fees(ctx: typer.Context, to: str = typer.Argument(..., help="Address to withdraw fees to")):
+def _sweep_fees_to_router(ctx: typer.Context, contract, name: str, yes: bool):
+    """Preview and send contract.sweepFeesToRouter() for DINModelRegistry or DinCoordinator.
+
+    Both contracts hold collected ETH until the owner sweeps the whole balance to
+    DinFeeRouter, which splits it per its ethSplit: the Treasury share is paid out,
+    the other shares accrue in the router (no withdrawal path yet).
+    """
     effective_network, w3, account, console = ctx.obj.get_en_w3_account_console()
-    DINModelRegistry_Contract = ctx.obj.get_deployed_din_registry_contract()
-    target_address = w3.to_checksum_address(to)
-    build_and_send_tx(
-        ctx, 
-        DINModelRegistry_Contract.functions.withdrawFees(target_address),
-        f"Withdrawing fees to {target_address}",
-        "Fees withdrawn successfully",
-        "Failed to withdraw fees"
+
+    owner = contract.functions.owner().call()
+    if owner.lower() != account.address.lower():
+        console.print(
+            f"[bold red]✗ Active wallet {account.address} is not the DIN-Representative "
+            f"(owner) wallet of {name}.[/bold red] Owner: {owner}"
+        )
+        raise typer.Exit(1)
+
+    fee_router_address = contract.functions.feeRouter().call()
+    if int(fee_router_address, 16) == 0:
+        console.print(
+            f"[bold red]✗ Fee router not set on {name}.[/bold red] It is wired at deploy "
+            "time by foundry/script/DeployPlatform.s.sol; this platform was not deployed "
+            "or wired by that script."
+        )
+        raise typer.Exit(1)
+
+    balance = w3.eth.get_balance(contract.address)
+    if balance == 0:
+        console.print(f"[yellow]No accumulated fees to sweep on {name}.[/yellow]")
+        return
+
+    fee_router = get_contract_instance(
+        str(files("dincli").joinpath("abis", "DinFeeRouter.json")),
+        effective_network,
+        fee_router_address,
+    )
+    validator_pool_bps, treasury_bps, storage_bps, _ = fee_router.functions.ethSplit().call()
+    treasury_address = fee_router.functions.treasury().call()
+
+    # Same arithmetic as DinFeeRouter.routeFeeETH: public goods absorbs rounding dust.
+    to_treasury = balance * treasury_bps // 10000
+    to_validator_pool = balance * validator_pool_bps // 10000
+    to_storage = balance * storage_bps // 10000
+    to_public_goods = balance - to_treasury - to_validator_pool - to_storage
+
+    console.print(f"[bold cyan]Sweep {w3.from_wei(balance, 'ether')} ETH from {name} to DinFeeRouter {fee_router_address}:[/bold cyan]")
+    console.print(f"  Treasury ({treasury_address}): {w3.from_wei(to_treasury, 'ether')} ETH — paid out")
+    console.print(f"  Validator pool: {w3.from_wei(to_validator_pool, 'ether')} ETH — accrues in router")
+    console.print(f"  Storage: {w3.from_wei(to_storage, 'ether')} ETH — accrues in router")
+    console.print(f"  Public goods: {w3.from_wei(to_public_goods, 'ether')} ETH — accrues in router")
+    console.print(
+        "[yellow]Shares that accrue in the router have no withdrawal path yet, and a sweep "
+        "cannot be undone.[/yellow]"
     )
 
-@registry_app.command("set-dao-admin")
-def set_dao_admin(ctx: typer.Context, new_admin: str = typer.Argument(..., help="New DAO admin address")):
-    effective_network, w3, account, console = ctx.obj.get_en_w3_account_console()
-    DINModelRegistry_Contract = ctx.obj.get_deployed_din_registry_contract()
-    target_address = w3.to_checksum_address(new_admin)
+    if not yes and not typer.confirm(f"Sweep {name} fees to the fee router?"):
+        console.print("[yellow]Aborted. No transaction sent.[/yellow]")
+        raise typer.Exit(0)
+
     build_and_send_tx(
-        ctx, 
-        DINModelRegistry_Contract.functions.setDAOAdmin(target_address),
-        f"Setting DAO admin to {target_address}",
-        "DAO admin set successfully",
-        "Failed to set DAO admin"
+        ctx,
+        contract.functions.sweepFeesToRouter(),
+        f"Sweeping {w3.from_wei(balance, 'ether')} ETH in fees from {name} to the fee router",
+        f"{name} fees swept to the fee router successfully",
+        f"Failed to sweep {name} fees to the fee router"
     )
+
+@registry_app.command("sweep-fees")
+def sweep_registry_fees(
+    ctx: typer.Context,
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt"),
+):
+    """Sweep the registry's model registration / manifest update fees to DinFeeRouter."""
+    _sweep_fees_to_router(ctx, ctx.obj.get_deployed_din_registry_contract(), "DINModelRegistry", yes)
+
+@coordinator_app.command("sweep-fees")
+def sweep_coordinator_fees(
+    ctx: typer.Context,
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt"),
+):
+    """Sweep the ETH DinCoordinator collected from depositAndMint (DIN purchases) to DinFeeRouter."""
+    _sweep_fees_to_router(ctx, ctx.obj.get_deployed_din_coordinator_contract(), "DinCoordinator", yes)
 
 
 @registry_app.command("list-pending-requests")
