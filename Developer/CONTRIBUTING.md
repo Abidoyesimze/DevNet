@@ -42,6 +42,11 @@ For issue-specific contributor packets, review questions, and curated reading li
 - Clear description of what and why
 - Add tests where applicable
 - Keep commits focused
+- **Changed a `foundry/src` contract's interface?** Regenerate the affected bundled ABIs in the same PR, after `forge build`:
+  ```
+  dincli system dump-abi --artifact foundry/out/<Contract>.sol/<Contract>.json --output dincli/abis --official
+  ```
+  `dincli/abis/*.json` is the fallback ABI `DinContext` loads when a model's manifest doesn't supply custom `task_contracts` artifacts — a stale bundle means dincli silently calls functions/reads events that no longer match what's deployed. No network or wallet needed to run it. See [issue #177](https://github.com/InfiniteZeroFoundation/DevNet/issues/177) for what drifting looks like when this is skipped.
 
 ## Code Standards
 
