@@ -146,6 +146,26 @@ dincli dinrep registry set-fees \
   --proprietary-update <eth>
 ```
 
+### Sweep Accumulated Fees
+
+Collected ETH stays in the contract that received it until the DIN-Representative sweeps it to `DinFeeRouter`. There are two sweep commands:
+
+```bash
+# Model registration and manifest update fees held by DINModelRegistry
+dincli dinrep registry sweep-fees
+
+# ETH that DinCoordinator received from DIN purchases (depositAndMint)
+dincli dinrep coordinator sweep-fees
+```
+
+- **Owner only:** the active wallet must be the contract's owner, i.e. the DIN-Representative wallet.
+- **Router wiring:** `foundry/script/DeployPlatform.s.sol` connects both contracts to the fee router when it deploys them. The CLI has no command for changing the router.
+- **Preview and confirmation:** each command reads the router's current `ethSplit`, shows how much will go to each bucket, and asks before sending. Pass `--yes` to skip the prompt.
+- **One sweep moves the whole balance.**
+
+> [!WARNING]
+> **Only the Treasury share leaves the router.** With the default `ethSplit` (validator pool 95%, Treasury 5%), the Treasury receives 5% of each sweep. The validator-pool, storage and public-goods shares stay in `DinFeeRouter` as `accruedEth`, and nothing can withdraw them yet: that waits on the future P3-5.2 / RES-1 consumers. A sweep can't be reversed, so treat swept non-Treasury ETH as locked until those consumers ship.
+
 ---
 
 ## 4. Slasher Management
