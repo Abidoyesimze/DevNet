@@ -1054,15 +1054,56 @@ def ensure_batch_seed_locked(
     if _current_seed() != b"\x00" * 32:
         return
 
-    # Seed is still unset: either the lock call itself re-anchored (rather
-    # than setting the seed, because >256 blocks elapsed since the last
-    # anchor) or it reverted for a reason a retry can recover from (e.g.
-    # the race above). Recurse once to wait for the (possibly freshly
-    # re-anchored) block instead of proceeding with a zero seed.
+    # Seed is still unset. The only recoverable case is a re-anchor: the lock
+    # call moved the seed block forward (>256 blocks elapsed since the last
+    # anchor) instead of setting the seed -- recurse to wait for the new
+    # block. Any other outcome (no gas funds, RPC down, a non-race revert)
+    # would fail the same way again immediately, since the seed block is
+    # already mined, so exit rather than retry (PR #191 review, No. 6).
+    new_seed_block = getattr(task_coordinator_contract.functions, seed_block_getter)(gi).call()
+    if new_seed_block != seed_block:
+        ensure_batch_seed_locked(
+            ctx, task_coordinator_contract, gi,
+            seed_getter, seed_block_getter, lock_fn, label, poll_interval,
+        )
+        return
+
+    console.print(
+        f"[bold red]{label.capitalize()} seed for GI {gi} is still unlocked after "
+        f"the lock attempt (seed block {seed_block} unchanged); not retrying.[/bold red]"
+    )
+    raise typer.Exit(1)
+
+
+# Per batch-seed pair: (seed getter, seed-block getter, lock fn, label, the
+# GIstate in which the seed is anchored but batches aren't created yet).
+BATCH_SEED_PAIRS = {
+    "agg": ("aggSeed", "aggSeedBlock", "lockAggSeed", "T1/T2 batch", "LMSevaluationClosed"),
+    "audit": ("auditSeed", "auditSeedBlock", "lockAuditSeed", "auditor-batch", "LMSclosed"),
+}
+
+
+def lock_batch_seed_if_pending(ctx, task_coordinator_contract, gi: int, curr_gi: int, curr_GIstate: int, kind: str) -> bool:
+    """Validator-side lock for a batch-assignment seed (BL-26).
+
+    The seed's blockhash is public as soon as the seed block is mined, so if
+    only the model owner ever locks it, they can decline to lock a draw they
+    dislike and wait out the ~256-block window for a re-anchor (a fresh
+    draw). Aggregators/auditors call this from their own commands so the
+    first validator online after the seed block locks it instead.
+
+    No-op (returns False) unless `gi` is the current GI and the GI is in the
+    state where the seed is anchored but batches aren't created yet;
+    otherwise waits for the seed block and locks (returns True).
+    """
+    seed_getter, seed_block_getter, lock_fn, label, pending_state = BATCH_SEED_PAIRS[kind]
+    if gi != curr_gi or GIstateToStr(curr_GIstate) != pending_state:
+        return False
     ensure_batch_seed_locked(
         ctx, task_coordinator_contract, gi,
-        seed_getter, seed_block_getter, lock_fn, label, poll_interval,
+        seed_getter, seed_block_getter, lock_fn, label,
     )
+    return True
 
 
 def print_tx_info(tx_hash, network=None, print_url = True):

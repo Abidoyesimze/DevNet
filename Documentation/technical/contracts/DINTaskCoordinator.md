@@ -213,7 +213,7 @@ Called after LM evaluation closes (`LMSevaluationClosed`). Reverts with `TC_AggS
 
 1. **Load aggregator pool:** filter the historical registration list `dinAggregators[_GI]` down to aggregators still `isValidatorActive` at call time (`_activeAggregatorPool`). Revert `TC_NotEnoughValidators` if the active count is below `T1_AGGREGATORS_PER_BATCH`.
 
-2. **Shuffle aggregators (Fisher-Yates, storage, `pure`):**
+2. **Shuffle aggregators (Fisher-Yates, `pure`):**
    ```
    j = keccak256(keccak256(aggSeed[_GI], "AGG_ADDR"), i, arr.length) % (i+1)
    ```
@@ -357,7 +357,7 @@ Two internal shuffle helpers (`pure`, taking an explicit `bytes32 seed`) mirror 
 
 | Function | Target | Entropy |
 |----------|--------|---------|
-| `_shuffleAddressArray` (storage) | Active aggregator pool | `keccak256(seed, "AGG_ADDR")` (`autoCreateTier1AndTier2`) or the dispute seed's own domain tag (`_assignFreshSubgroup`) |
+| `_shuffleAddressArray` | Active aggregator pool | `keccak256(seed, "AGG_ADDR")` (`autoCreateTier1AndTier2`) or the dispute seed's own domain tag (`_assignFreshSubgroup`) |
 | `_shuffleUintArray` (memory) | Model index pool | `keccak256(seed, "AGG_IDX")` |
 
 Both use Fisher-Yates algorithm. `aggSeed[_GI]` / `auditSeed[_GI]` (§11.1) replaced `blockhash(block.number - 1)` / `block.timestamp + msg.sender` as of issue #156 H-2 (task_240926_18 Part B) — see Security Considerations below for what the fix does and doesn't close.
@@ -370,7 +370,7 @@ Both use Fisher-Yates algorithm. `aggSeed[_GI]` / `auditSeed[_GI]` (§11.1) repl
 - **Lock:** `lockAggSeed(uint _GI)` / `lockAuditSeed(uint _GI)`, callable by **anyone**, once `block.number > seedBlock`. Stores `seed = keccak256(blockhash(seedBlock), _GI, "AGG"/"AUD")` and emits `AggSeedLocked`/`AuditSeedLocked`. If `blockhash(seedBlock) == 0` (more than 256 blocks passed), re-anchors instead (`seedBlock = block.number + disputeSeedDelay`, `AggSeedReanchored`/`AuditSeedReanchored`) rather than storing a zero-derived seed.
 - **Gate:** `autoCreateTier1AndTier2` reverts `TC_AggSeedNotLocked` and `createAuditorsBatches` reverts `TC_AuditSeedNotLocked` unless `aggSeed[_GI]`/`auditSeed[_GI]` is already non-zero. `DINTaskAuditor.createAuditorsBatches(uint, bytes32)` independently rejects a zero seed too (`TA_AuditSeedNotLocked`), defense-in-depth on top of the coordinator's own check.
 
-**Residual trust and gaps** (raised in the PR #191 review, not fixed by this mechanism):
+**Residual trust and gaps** (raised in the PR #191 review, not fixed by this mechanism; tracked as BL-26 in [`Developer/BACK_LOG.md`](../../../Developer/BACK_LOG.md)):
 - **Sequencer trust:** `blockhash` is sequencer-produced on OP Stack, so this design trusts the sequencer not to grind — same caveat as the dispute seed. VRF is the mainnet-grade follow-up (issue #178).
 - **Re-roll by declining to lock:** once `seedBlock` is mined, its hash (and therefore the resulting shuffle) is computable off-chain by anyone watching. The model owner can simply not call `lock…Seed` if they dislike the preview, wait out the 256-block window, and get a fresh anchor on the next lock call — repeatable. The permissionless lock only protects against this if another party locks first.
 - **Post-lock pool reshaping:** `_activeAggregatorPool`/`_activeAuditorPool` are evaluated at `autoCreateTier1AndTier2`/`createAuditorsBatches` call time, *after* the seed is already public. A validator can unstake between the lock and the create call to remove themselves from the pool, which re-shuffles everyone else's assignment (Fisher-Yates re-rolls on any pool-size change) — an attacker with several registered addresses can compute all subset outcomes off-chain and unstake whichever produces the batch they want.

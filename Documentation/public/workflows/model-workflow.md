@@ -334,7 +334,10 @@ The Model Owner prepares evaluation batches and test data, then auditors evaluat
 > land in which batch). This adds a short automatic pause (a handful of
 > blocks, ~seconds on Optimism Sepolia) before the command proceeds — no
 > extra action needed, and if another process already locked the seed
-> first, the wait is skipped entirely. On the `local` network this
+> first, the wait is skipped entirely. Auditors lock the same seed from
+> their side (`dincli auditor lock-seed`, or automatically via
+> `lms-evaluation show-batch`), so the seed usually is already locked by
+> the time the Model Owner runs this. On the `local` network this
 > requires an anvil instance producing blocks on its own (`foundry/anvil.sh`
 > passes `--block-time`) — an idle anvil started without block production
 > never mines the anchor block, and the wait never ends.
@@ -388,6 +391,8 @@ Eligible local models are aggregated hierarchically. Tier 1 (T1) aggregation com
 > waits for and locks its own ungrindable, future-block-anchored seed
 > (issue #156) before creating T1/T2 batches. Automatic short pause, no
 > extra action needed — same `local`-network block-production caveat.
+> Aggregators lock it from their side too (`dincli aggregator lock-seed`,
+> or automatically via `show-t1-batches` / `show-t2-batches`).
 
 ```bash
 # create t1 and t2 batches

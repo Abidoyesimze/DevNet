@@ -8,7 +8,11 @@ instead of setting it (>256 blocks elapsed since anchor).
 """
 from unittest.mock import MagicMock, patch
 
-from dincli.cli.utils import ensure_batch_seed_locked
+import pytest
+import typer
+
+from dincli.cli.utils import (GIstatestrToIndex, ensure_batch_seed_locked,
+                              lock_batch_seed_if_pending)
 
 ZERO_SEED = b"\x00" * 32
 LOCKED_SEED = b"\x11" * 32
@@ -190,3 +194,96 @@ def test_lock_call_race_does_not_abort_once_seed_is_set(mock_build_and_send_tx):
     _, kwargs = mock_build_and_send_tx.call_args
     assert kwargs.get("exit_on_failure") is False
     assert state["seed"] == LOCKED_SEED
+
+
+@patch("dincli.cli.utils.build_and_send_tx")
+def test_persistent_lock_failure_exits_after_one_attempt(mock_build_and_send_tx):
+    """PR #191 review, finding No. 6: a lock call that keeps failing (no gas
+    funds, RPC down, any non-race revert) with the seed block already mined
+    and unchanged must not be retried -- the retry would fail the same way
+    at once, recursing ~1,000 deep into a RecursionError. Exactly one
+    attempt, then typer.Exit."""
+    state = {"seed": ZERO_SEED, "seed_block": 100, "lock_calls": []}
+    contract = _make_contract(state)
+    w3 = _make_w3(150)
+    ctx, console = _make_ctx(w3)
+
+    def _lock_side_effect(*args, exit_on_failure=True, **kwargs):
+        # Follows build_and_send_tx's real failure branch; the seed and
+        # seed block are both left untouched.
+        if exit_on_failure:
+            raise typer.Exit(1)
+        return None
+
+    mock_build_and_send_tx.side_effect = _lock_side_effect
+
+    with pytest.raises(typer.Exit):
+        _call(ctx, contract)
+
+    mock_build_and_send_tx.assert_called_once()
+    assert state["lock_calls"] == [GI]
+    assert state["seed"] == ZERO_SEED
+
+
+
+@pytest.mark.parametrize("failure", ["mined_revert", "receipt_timeout"])
+@patch("dincli.cli.utils.print_tx_info")
+def test_persistent_lock_failure_after_send_spends_gas_once(_mock_print_tx_info, failure):
+    """PR #191 review, No. 6 gas-spending variant: estimation succeeds, the
+    lock tx is actually sent, then mines as a revert or its receipt times
+    out. Runs the real build_and_send_tx (only w3 is faked) -- exactly one
+    tx must be sent, then typer.Exit, rather than one paid tx per retry."""
+    state = {"seed": ZERO_SEED, "seed_block": 100, "lock_calls": []}
+    contract = _make_contract(state)
+    w3 = _make_w3(150)
+    w3.eth.estimate_gas.return_value = 100_000
+    if failure == "mined_revert":
+        w3.eth.wait_for_transaction_receipt.return_value = MagicMock(status=0)
+    else:
+        w3.eth.wait_for_transaction_receipt.side_effect = TimeoutError("receipt timeout")
+    ctx, console = _make_ctx(w3)
+    ctx.obj.get_tx_params.return_value = {}
+
+    with pytest.raises(typer.Exit):
+        _call(ctx, contract)
+
+    assert w3.eth.send_raw_transaction.call_count == 1
+    assert state["lock_calls"] == [GI]
+    assert state["seed"] == ZERO_SEED
+
+# --- lock_batch_seed_if_pending: validator-side lock (BL-26) ---------------
+
+
+@patch("dincli.cli.utils.ensure_batch_seed_locked")
+def test_validator_lock_audit_seed_when_pending(mock_ensure):
+    ctx, contract = MagicMock(), MagicMock()
+
+    assert lock_batch_seed_if_pending(ctx, contract, GI, GI, GIstatestrToIndex("LMSclosed"), "audit") is True
+
+    mock_ensure.assert_called_once_with(
+        ctx, contract, GI, "auditSeed", "auditSeedBlock", "lockAuditSeed", "auditor-batch",
+    )
+
+
+@patch("dincli.cli.utils.ensure_batch_seed_locked")
+def test_validator_lock_agg_seed_when_pending(mock_ensure):
+    ctx, contract = MagicMock(), MagicMock()
+
+    assert lock_batch_seed_if_pending(ctx, contract, GI, GI, GIstatestrToIndex("LMSevaluationClosed"), "agg") is True
+
+    mock_ensure.assert_called_once_with(
+        ctx, contract, GI, "aggSeed", "aggSeedBlock", "lockAggSeed", "T1/T2 batch",
+    )
+
+
+@patch("dincli.cli.utils.ensure_batch_seed_locked")
+def test_validator_lock_noop_outside_pending_state_or_past_gi(mock_ensure):
+    ctx, contract = MagicMock(), MagicMock()
+
+    # Batches already created, or the other seed's pending state.
+    assert lock_batch_seed_if_pending(ctx, contract, GI, GI, GIstatestrToIndex("AuditorsBatchesCreated"), "audit") is False
+    assert lock_batch_seed_if_pending(ctx, contract, GI, GI, GIstatestrToIndex("LMSclosed"), "agg") is False
+    # A past GI (e.g. show-batch --gi <old>) never locks.
+    assert lock_batch_seed_if_pending(ctx, contract, GI, GI + 1, GIstatestrToIndex("LMSclosed"), "audit") is False
+
+    mock_ensure.assert_not_called()
