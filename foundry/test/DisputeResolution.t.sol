@@ -242,13 +242,65 @@ contract DisputeResolutionTest is Test {
         vm.stopPrank();
 
         (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, 0);
-        for (uint i = 0; i < t1aggs.length; i++) {
-            vm.prank(t1aggs[i]);
-            tc.submitT1Aggregation(1, 0, WINNING_CID);
-        }
+        _commitAndRevealT1(t1aggs, 1, 0, WINNING_CID);
 
         vm.prank(modelOwner);
         tc.finalizeT1Aggregation(1);
+    }
+
+    /// @dev issue #156 M-1: commits each of `aggs` to `cid` for T1 batch
+    ///      `batchId`, opens the reveal window, then reveals every commit.
+    ///      Small helper (not inlined at each call site) so fixtures like
+    ///      _runToT1Finalized below stay small -- the same reasoning as
+    ///      _lockAuditSeedNow/_lockAggSeedNow just above avoided a solc
+    ///      via_ir ICE in this file previously.
+    function _commitAndRevealT1(
+        address[] memory aggs,
+        uint gi,
+        uint batchId,
+        bytes32 cid
+    ) internal {
+        for (uint i = 0; i < aggs.length; i++) {
+            bytes32 commitHash = keccak256(
+                abi.encode(cid, TEST_SALT, aggs[i], gi, DINTaskCoordinator.TierKind.Tier1, batchId)
+            );
+            vm.prank(aggs[i]);
+            tc.commitT1Aggregation(gi, batchId, commitHash);
+        }
+
+        vm.prank(modelOwner);
+        tc.startT1AggregationReveal(gi);
+
+        for (uint i = 0; i < aggs.length; i++) {
+            vm.prank(aggs[i]);
+            tc.revealT1Aggregation(gi, batchId, cid, TEST_SALT);
+        }
+    }
+
+    /// @dev Same as `_commitAndRevealT1`, but each aggregator can reveal a
+    ///      different CID (per-aggregator dissent) -- `cids[i]` must line up
+    ///      with `aggs[i]`.
+    function _commitAndRevealT1Dissenting(
+        address[] memory aggs,
+        uint gi,
+        uint batchId,
+        bytes32[] memory cids
+    ) internal {
+        for (uint i = 0; i < aggs.length; i++) {
+            bytes32 commitHash = keccak256(
+                abi.encode(cids[i], TEST_SALT, aggs[i], gi, DINTaskCoordinator.TierKind.Tier1, batchId)
+            );
+            vm.prank(aggs[i]);
+            tc.commitT1Aggregation(gi, batchId, commitHash);
+        }
+
+        vm.prank(modelOwner);
+        tc.startT1AggregationReveal(gi);
+
+        for (uint i = 0; i < aggs.length; i++) {
+            vm.prank(aggs[i]);
+            tc.revealT1Aggregation(gi, batchId, cids[i], TEST_SALT);
+        }
     }
 
     /// @dev Same as `_runToT1Finalized`, except one of the disputed batch's
@@ -344,13 +396,13 @@ contract DisputeResolutionTest is Test {
         // dissenter) votes a different CID. WINNING_CID still wins 2-1.
         (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, 0);
         dissenter = t1aggs[2];
+        bytes32[] memory cids = new bytes32[](t1aggs.length);
         for (uint i = 0; i < t1aggs.length; i++) {
-            bytes32 cid = t1aggs[i] == dissenter
+            cids[i] = t1aggs[i] == dissenter
                 ? bytes32(uint256(0xBAD))
                 : WINNING_CID;
-            vm.prank(t1aggs[i]);
-            tc.submitT1Aggregation(1, 0, cid);
         }
+        _commitAndRevealT1Dissenting(t1aggs, 1, 0, cids);
 
         vm.prank(modelOwner);
         tc.finalizeT1Aggregation(1);

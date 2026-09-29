@@ -319,12 +319,22 @@ contract SecurityFindingsTest is Test {
         (, address[] memory t1aggs,,,) = tc.getTier1Batch(1, 0);
         assertEq(t1aggs.length, 3, "sanity: T1 batch should have 3 aggregators");
 
-        // C-2 regression: bytes32(0) is now rejected at submit time with TC_ZeroCID.
-        // Before the fix this call succeeded and permanently bricked finalizeT1Aggregation
-        // (TC_NoSubmissions at finalize, GI stuck forever).
+        // C-2 regression: bytes32(0) is now rejected at reveal time with TC_ZeroCID
+        // (issue #156 M-1 moved the actual CID write from submit to reveal). Before
+        // the original fix this call succeeded and permanently bricked
+        // finalizeT1Aggregation (TC_NoSubmissions at finalize, GI stuck forever).
+        bytes32 commitHash = keccak256(
+            abi.encode(bytes32(0), TEST_SALT, t1aggs[0], uint(1), DINTaskCoordinator.TierKind.Tier1, uint(0))
+        );
+        vm.prank(t1aggs[0]);
+        tc.commitT1Aggregation(1, 0, commitHash);
+
+        vm.prank(modelOwner);
+        tc.startT1AggregationReveal(1);
+
         vm.prank(t1aggs[0]);
         vm.expectRevert(TC_ZeroCID.selector);
-        tc.submitT1Aggregation(1, 0, bytes32(0));
+        tc.revealT1Aggregation(1, 0, bytes32(0), TEST_SALT);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -454,8 +464,19 @@ contract SecurityFindingsTest is Test {
         (, address[] memory t1aggs,,,) = tc.getTier1Batch(1, 0);
         bytes32 realCID = bytes32(uint256(0xC1D));
         for (uint i = 0; i < t1aggs.length; i++) {
+            bytes32 commitHash = keccak256(
+                abi.encode(realCID, TEST_SALT, t1aggs[i], uint(1), DINTaskCoordinator.TierKind.Tier1, uint(0))
+            );
             vm.prank(t1aggs[i]);
-            tc.submitT1Aggregation(1, 0, realCID);
+            tc.commitT1Aggregation(1, 0, commitHash);
+        }
+
+        vm.prank(modelOwner);
+        tc.startT1AggregationReveal(1);
+
+        for (uint i = 0; i < t1aggs.length; i++) {
+            vm.prank(t1aggs[i]);
+            tc.revealT1Aggregation(1, 0, realCID, TEST_SALT);
         }
 
         vm.startPrank(modelOwner);
@@ -467,6 +488,7 @@ contract SecurityFindingsTest is Test {
         // trivially. Not the subject of this measurement (H-1's aggregator-
         // side loops scale with *aggregator* count, held fixed here at the
         // minimum needed to reach slashAuditors()).
+        tc.startT2AggregationReveal(1);
         tc.finalizeT2Aggregation(1);
         vm.stopPrank();
     }

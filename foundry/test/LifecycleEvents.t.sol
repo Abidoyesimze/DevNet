@@ -6,8 +6,9 @@ pragma solidity ^0.8.28;
 //   - GIStateChanged emitted by _setGIstate with correct GI and ordinal
 //   - GI ordering fix: GIstarted fires for GI N, not GI N-1
 //   - LocalModelSubmitted emitted by DINTaskAuditor.submitLocalModel
-//   - T1AggregationSubmitted emitted by submitT1Aggregation
-//   - T2AggregationSubmitted emitted by submitT2Aggregation
+//   - T1AggregationSubmitted emitted by revealT1Aggregation (issue #156 M-1
+//     split submitT1Aggregation into commitT1Aggregation + revealT1Aggregation)
+//   - T2AggregationSubmitted emitted by revealT2Aggregation (same split)
 //   - T1BatchFinalized emitted per batch in finalizeT1Aggregation
 //   - T2Finalized emitted in finalizeT2Aggregation
 // Run: forge test --match-contract LifecycleEventsTest -vv
@@ -70,12 +71,14 @@ contract LifecycleEventsTest is Test {
     uint8 constant GI_LMS_EVAL_CLOSED              = 15;
     uint8 constant GI_T1T2_CREATED                 = 16;
     uint8 constant GI_T1_AGG_STARTED               = 17;
-    uint8 constant GI_T1_AGG_DONE                  = 18;
-    uint8 constant GI_T2_AGG_STARTED               = 19;
-    uint8 constant GI_T2_AGG_DONE                  = 20;
-    uint8 constant GI_AUDITORS_SLASHED             = 21;
-    uint8 constant GI_AGGREGATORS_SLASHED          = 22;
-    uint8 constant GI_ENDED                        = 23;
+    uint8 constant GI_T1_AGG_REVEAL_STARTED        = 18;
+    uint8 constant GI_T1_AGG_DONE                  = 19;
+    uint8 constant GI_T2_AGG_STARTED               = 20;
+    uint8 constant GI_T2_AGG_REVEAL_STARTED        = 21;
+    uint8 constant GI_T2_AGG_DONE                  = 22;
+    uint8 constant GI_AUDITORS_SLASHED             = 23;
+    uint8 constant GI_AGGREGATORS_SLASHED          = 24;
+    uint8 constant GI_ENDED                        = 25;
 
     function setUp() public {
         vm.startPrank(admin);
@@ -248,6 +251,24 @@ contract LifecycleEventsTest is Test {
         vm.stopPrank();
     }
 
+    /// @dev issue #156 M-1: commits `who` to `cid` for T1/T2 batch `batchId`.
+    ///      Does not open the reveal window itself.
+    function _commitT1(address who, uint gi, uint batchId, bytes32 cid) internal {
+        bytes32 commitHash = keccak256(
+            abi.encode(cid, TEST_SALT, who, gi, DINTaskCoordinator.TierKind.Tier1, batchId)
+        );
+        vm.prank(who);
+        tc.commitT1Aggregation(gi, batchId, commitHash);
+    }
+
+    function _commitT2(address who, uint gi, uint batchId, bytes32 cid) internal {
+        bytes32 commitHash = keccak256(
+            abi.encode(cid, TEST_SALT, who, gi, DINTaskCoordinator.TierKind.Tier2, batchId)
+        );
+        vm.prank(who);
+        tc.commitT2Aggregation(gi, batchId, commitHash);
+    }
+
     // ── GIStateChanged ordering fix ───────────────────────────────────────────
 
     /// @dev Verifies that GIstarted fires with the new GI index (N), not N-1.
@@ -273,8 +294,15 @@ contract LifecycleEventsTest is Test {
         for (uint b = 0; b < t1Count; b++) {
             (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, b);
             for (uint i = 0; i < t1aggs.length; i++) {
+                _commitT1(t1aggs[i], 1, b, CID_A);
+            }
+        }
+        vm.prank(modelOwner); tc.startT1AggregationReveal(1);
+        for (uint b = 0; b < t1Count; b++) {
+            (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, b);
+            for (uint i = 0; i < t1aggs.length; i++) {
                 vm.prank(t1aggs[i]);
-                tc.submitT1Aggregation(1, b, CID_A);
+                tc.revealT1Aggregation(1, b, CID_A, TEST_SALT);
             }
         }
         vm.prank(modelOwner); tc.finalizeT1Aggregation(1);
@@ -282,10 +310,16 @@ contract LifecycleEventsTest is Test {
 
         try tc.getTier2Batch(1, 0) returns (uint, address[] memory t2aggs, bool, bytes32) {
             for (uint i = 0; i < t2aggs.length; i++) {
-                vm.prank(t2aggs[i]);
-                tc.submitT2Aggregation(1, 0, CID_B);
+                _commitT2(t2aggs[i], 1, 0, CID_B);
             }
-        } catch {}
+            vm.prank(modelOwner); tc.startT2AggregationReveal(1);
+            for (uint i = 0; i < t2aggs.length; i++) {
+                vm.prank(t2aggs[i]);
+                tc.revealT2Aggregation(1, 0, CID_B, TEST_SALT);
+            }
+        } catch {
+            vm.prank(modelOwner); tc.startT2AggregationReveal(1);
+        }
 
         vm.prank(modelOwner); tc.finalizeT2Aggregation(1);
         vm.prank(modelOwner); tc.slashAuditors(1);
@@ -335,10 +369,13 @@ contract LifecycleEventsTest is Test {
         (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, 0);
         address firstAgg = t1aggs[0];
 
+        _commitT1(firstAgg, 1, 0, CID_A);
+        vm.prank(modelOwner); tc.startT1AggregationReveal(1);
+
         vm.expectEmit(true, true, true, true, address(tc));
         emit DINTaskCoordinator.T1AggregationSubmitted(1, 0, firstAgg, CID_A);
         vm.prank(firstAgg);
-        tc.submitT1Aggregation(1, 0, CID_A);
+        tc.revealT1Aggregation(1, 0, CID_A, TEST_SALT);
     }
 
     // ── T2AggregationSubmitted ────────────────────────────────────────────────
@@ -351,8 +388,15 @@ contract LifecycleEventsTest is Test {
         for (uint b = 0; b < t1Count; b++) {
             (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, b);
             for (uint i = 0; i < t1aggs.length; i++) {
+                _commitT1(t1aggs[i], 1, b, CID_A);
+            }
+        }
+        vm.prank(modelOwner); tc.startT1AggregationReveal(1);
+        for (uint b = 0; b < t1Count; b++) {
+            (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, b);
+            for (uint i = 0; i < t1aggs.length; i++) {
                 vm.prank(t1aggs[i]);
-                tc.submitT1Aggregation(1, b, CID_A);
+                tc.revealT1Aggregation(1, b, CID_A, TEST_SALT);
             }
         }
         vm.prank(modelOwner); tc.finalizeT1Aggregation(1);
@@ -360,10 +404,13 @@ contract LifecycleEventsTest is Test {
 
         (uint bId, address[] memory t2aggs, , ) = tc.getTier2Batch(1, 0);
 
+        _commitT2(t2aggs[0], 1, bId, CID_B);
+        vm.prank(modelOwner); tc.startT2AggregationReveal(1);
+
         vm.expectEmit(true, true, true, true, address(tc));
         emit DINTaskCoordinator.T2AggregationSubmitted(1, bId, t2aggs[0], CID_B);
         vm.prank(t2aggs[0]);
-        tc.submitT2Aggregation(1, bId, CID_B);
+        tc.revealT2Aggregation(1, bId, CID_B, TEST_SALT);
     }
 
     // ── T1BatchFinalized ──────────────────────────────────────────────────────
@@ -380,8 +427,15 @@ contract LifecycleEventsTest is Test {
         for (uint b = 0; b < t1Count; b++) {
             (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, b);
             for (uint i = 0; i < t1aggs.length; i++) {
+                _commitT1(t1aggs[i], 1, b, CID_A);
+            }
+        }
+        vm.prank(modelOwner); tc.startT1AggregationReveal(1);
+        for (uint b = 0; b < t1Count; b++) {
+            (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, b);
+            for (uint i = 0; i < t1aggs.length; i++) {
                 vm.prank(t1aggs[i]);
-                tc.submitT1Aggregation(1, b, CID_A);
+                tc.revealT1Aggregation(1, b, CID_A, TEST_SALT);
             }
         }
 
@@ -404,8 +458,15 @@ contract LifecycleEventsTest is Test {
         for (uint b = 0; b < t1Count; b++) {
             (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, b);
             for (uint i = 0; i < t1aggs.length; i++) {
+                _commitT1(t1aggs[i], 1, b, CID_A);
+            }
+        }
+        vm.prank(modelOwner); tc.startT1AggregationReveal(1);
+        for (uint b = 0; b < t1Count; b++) {
+            (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, b);
+            for (uint i = 0; i < t1aggs.length; i++) {
                 vm.prank(t1aggs[i]);
-                tc.submitT1Aggregation(1, b, CID_A);
+                tc.revealT1Aggregation(1, b, CID_A, TEST_SALT);
             }
         }
         vm.prank(modelOwner); tc.finalizeT1Aggregation(1);
@@ -413,8 +474,12 @@ contract LifecycleEventsTest is Test {
 
         (, address[] memory t2aggs, , ) = tc.getTier2Batch(1, 0);
         for (uint i = 0; i < t2aggs.length; i++) {
+            _commitT2(t2aggs[i], 1, 0, CID_B);
+        }
+        vm.prank(modelOwner); tc.startT2AggregationReveal(1);
+        for (uint i = 0; i < t2aggs.length; i++) {
             vm.prank(t2aggs[i]);
-            tc.submitT2Aggregation(1, 0, CID_B);
+            tc.revealT2Aggregation(1, 0, CID_B, TEST_SALT);
         }
 
         vm.expectEmit(true, false, false, true, address(tc));
@@ -538,8 +603,20 @@ contract LifecycleEventsTest is Test {
         for (uint b = 0; b < t1Count; b++) {
             (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, b);
             for (uint i = 0; i < t1aggs.length; i++) {
+                _commitT1(t1aggs[i], 1, b, CID_A);
+            }
+        }
+
+        // T1AggregationRevealStarted (issue #156 M-1)
+        vm.expectEmit(true, true, false, false, address(tc));
+        emit DINTaskCoordinator.GIStateChanged(1, GI_T1_AGG_REVEAL_STARTED);
+        vm.prank(modelOwner); tc.startT1AggregationReveal(1);
+
+        for (uint b = 0; b < t1Count; b++) {
+            (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, b);
+            for (uint i = 0; i < t1aggs.length; i++) {
                 vm.prank(t1aggs[i]);
-                tc.submitT1Aggregation(1, b, CID_A);
+                tc.revealT1Aggregation(1, b, CID_A, TEST_SALT);
             }
         }
 
@@ -555,8 +632,17 @@ contract LifecycleEventsTest is Test {
 
         (, address[] memory t2aggs, , ) = tc.getTier2Batch(1, 0);
         for (uint i = 0; i < t2aggs.length; i++) {
+            _commitT2(t2aggs[i], 1, 0, CID_B);
+        }
+
+        // T2AggregationRevealStarted (issue #156 M-1)
+        vm.expectEmit(true, true, false, false, address(tc));
+        emit DINTaskCoordinator.GIStateChanged(1, GI_T2_AGG_REVEAL_STARTED);
+        vm.prank(modelOwner); tc.startT2AggregationReveal(1);
+
+        for (uint i = 0; i < t2aggs.length; i++) {
             vm.prank(t2aggs[i]);
-            tc.submitT2Aggregation(1, 0, CID_B);
+            tc.revealT2Aggregation(1, 0, CID_B, TEST_SALT);
         }
 
         // T2AggregationDone
