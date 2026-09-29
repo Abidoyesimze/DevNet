@@ -192,6 +192,52 @@
     },
     {
       "type": "function",
+      "name": "commitT1Aggregation",
+      "inputs": [
+        {
+          "name": "_GI",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "_batchId",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "commitHash",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "commitT2Aggregation",
+      "inputs": [
+        {
+          "name": "_GI",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "_batchId",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "commitHash",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
       "name": "createAuditorsBatches",
       "inputs": [
         {
@@ -827,6 +873,62 @@
     },
     {
       "type": "function",
+      "name": "revealT1Aggregation",
+      "inputs": [
+        {
+          "name": "_GI",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "_batchId",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "_aggregationCID",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        },
+        {
+          "name": "salt",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "revealT2Aggregation",
+      "inputs": [
+        {
+          "name": "_GI",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "_batchId",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "_aggregationCID",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        },
+        {
+          "name": "salt",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
       "name": "s2SlashFractionBps",
       "inputs": [],
       "outputs": [
@@ -1146,6 +1248,19 @@
     },
     {
       "type": "function",
+      "name": "startT1AggregationReveal",
+      "inputs": [
+        {
+          "name": "_GI",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
       "name": "startT2Aggregation",
       "inputs": [
         {
@@ -1159,22 +1274,12 @@
     },
     {
       "type": "function",
-      "name": "submitT1Aggregation",
+      "name": "startT2AggregationReveal",
       "inputs": [
         {
           "name": "_GI",
           "type": "uint256",
           "internalType": "uint256"
-        },
-        {
-          "name": "_batchId",
-          "type": "uint256",
-          "internalType": "uint256"
-        },
-        {
-          "name": "_aggregationCID",
-          "type": "bytes32",
-          "internalType": "bytes32"
         }
       ],
       "outputs": [],
@@ -1182,26 +1287,61 @@
     },
     {
       "type": "function",
-      "name": "submitT2Aggregation",
+      "name": "t1CommitHash",
       "inputs": [
         {
-          "name": "_GI",
+          "name": "",
           "type": "uint256",
           "internalType": "uint256"
         },
         {
-          "name": "_batchId",
+          "name": "",
           "type": "uint256",
           "internalType": "uint256"
         },
         {
-          "name": "_aggregationCID",
+          "name": "",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
           "type": "bytes32",
           "internalType": "bytes32"
         }
       ],
-      "outputs": [],
-      "stateMutability": "nonpayable"
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "t1Committed",
+      "inputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bool",
+          "internalType": "bool"
+        }
+      ],
+      "stateMutability": "view"
     },
     {
       "type": "function",
@@ -1286,6 +1426,64 @@
           "name": "",
           "type": "uint256",
           "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "t2CommitHash",
+      "inputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "t2Committed",
+      "inputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bool",
+          "internalType": "bool"
         }
       ],
       "stateMutability": "view"
@@ -1933,6 +2131,37 @@
     },
     {
       "type": "event",
+      "name": "T1AggregationCommitted",
+      "inputs": [
+        {
+          "name": "GI",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "batchId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "aggregator",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "commitHash",
+          "type": "bytes32",
+          "indexed": false,
+          "internalType": "bytes32"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
       "name": "T1AggregationSubmitted",
       "inputs": [
         {
@@ -1980,6 +2209,37 @@
         },
         {
           "name": "winningCID",
+          "type": "bytes32",
+          "indexed": false,
+          "internalType": "bytes32"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "T2AggregationCommitted",
+      "inputs": [
+        {
+          "name": "GI",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "batchId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "aggregator",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "commitHash",
           "type": "bytes32",
           "indexed": false,
           "internalType": "bytes32"
@@ -2415,7 +2675,67 @@
     },
     {
       "type": "error",
+      "name": "TC_T1AlreadyCommitted",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_T1EmptyCommitHash",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_T1NoCommitFound",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_T1RevealCannotBeStarted",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_T1RevealHashMismatch",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_T1RevealPhaseNotOpen",
+      "inputs": []
+    },
+    {
+      "type": "error",
       "name": "TC_T2AggregationNotStarted",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_T2AlreadyCommitted",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_T2EmptyCommitHash",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_T2NoCommitFound",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_T2RevealCannotBeStarted",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_T2RevealHashMismatch",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TC_T2RevealPhaseNotOpen",
       "inputs": []
     },
     {
