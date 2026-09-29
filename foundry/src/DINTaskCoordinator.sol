@@ -953,12 +953,16 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
                 bool submitted = t1Submitted[_GI][b.batchId][aggregator];
                 if (!submitted) {
                     // S2 liveness fault: partial slash + S5/S6 tracking.
-                    uint256 actualSlashed = dinvalidatorStakeContract.slashPartial(
-                        aggregator,
-                        s2Amount,
-                        "AGG_T1_NO_SUBMISSION",
-                        _GI
-                    );
+                    // Skip when rounding reduces s2Amount to 0 — slashPartial
+                    // reverts InvalidSlashAmount on zero, bricking the GI.
+                    uint256 actualSlashed = s2Amount > 0
+                        ? dinvalidatorStakeContract.slashPartial(
+                            aggregator,
+                            s2Amount,
+                            "AGG_T1_NO_SUBMISSION",
+                            _GI
+                        )
+                        : 0;
                     emit AggregatorSlashed(_GI, b.batchId, aggregator, "AGG_T1_NO_SUBMISSION", s2Amount, actualSlashed);
                     // No S6 recordNoParticipation here: slashPartial above already
                     // penalises this missed submission (S2, escalating to S5 on
@@ -989,12 +993,15 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
                 bool submitted = t2Submitted[_GI][b.batchId][aggregator];
                 if (!submitted) {
                     // S2 liveness fault: partial slash + S5/S6 tracking.
-                    uint256 actualSlashed = dinvalidatorStakeContract.slashPartial(
-                        aggregator,
-                        s2Amount,
-                        "AGG_T2_NO_SUBMISSION",
-                        _GI
-                    );
+                    // Skip when rounding reduces s2Amount to 0 (same guard as T1).
+                    uint256 actualSlashed = s2Amount > 0
+                        ? dinvalidatorStakeContract.slashPartial(
+                            aggregator,
+                            s2Amount,
+                            "AGG_T2_NO_SUBMISSION",
+                            _GI
+                        )
+                        : 0;
                     emit AggregatorSlashed(_GI, b.batchId, aggregator, "AGG_T2_NO_SUBMISSION", s2Amount, actualSlashed);
                     // No S6 recordNoParticipation here: same rationale as the T1
                     // branch above (S2/S5 already covers this event; avoids
@@ -1134,7 +1141,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     ///      Setting to 10000 restores the previous flat-minStake behavior.
     /// @param bps New fraction in basis points (0–10000).
     function setS2SlashFractionBps(uint256 bps) external onlyOwner {
-        if (bps > 10_000) revert TC_InvalidSlashFraction();
+        if (bps == 0 || bps > 10_000) revert TC_InvalidSlashFraction();
         uint256 old = s2SlashFractionBps;
         s2SlashFractionBps = bps;
         emit S2SlashFractionBpsUpdated(old, bps);
