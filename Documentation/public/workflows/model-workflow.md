@@ -369,6 +369,17 @@ dincli model-owner lms-evaluation close <model_id>
 
 Eligible local models are aggregated hierarchically. Tier 1 (T1) aggregation combines sub-batches, and Tier 2 (T2) aggregation combines the results of T1 into the new global model.
 
+> [!NOTE]
+> T1 and T2 aggregation submissions use commit-then-reveal (issue #156
+> M-1): `aggregator aggregate-t1/t2 --submit` only **commits** a hidden
+> hash of the aggregated CID. The model owner must close the commit
+> window and open the reveal window (`aggregation T1/T2 start-reveal`)
+> before aggregators can reveal with `aggregator reveal-t1`/`reveal-t2`
+> — only revealed CIDs count toward the batch's finalized result. An
+> aggregator who commits but never reveals is excluded from finalization
+> and is still slashable for a missed submission, exactly as if they had
+> never submitted at all.
+
 **Model Owner** generates T1 & T2 batches and starts T1 aggregation:
 
 ```bash
@@ -377,17 +388,29 @@ dincli model-owner aggregation create-t1nt2-batches <model_id>
 # show t1 and t2 batches
 dincli model-owner aggregation show-t1-batches <model_id> --detailed
 dincli model-owner aggregation show-t2-batches <model_id> --detailed
-# start t1 aggregation
+# start t1 aggregation (opens the commit window)
 dincli model-owner aggregation T1 start <model_id>
 ```
 
-**Aggregators** perform T1 aggregation (repeat for each aggregator):
+**Aggregators** commit their T1 aggregation (repeat for each aggregator):
 
 ```bash
 # show the aggregator its assigned t1 batches
 dincli aggregator show-t1-batches <model_id> --detailed
-# aggregate the assigned t1 batches
+# aggregate and commit the assigned t1 batches
 dincli aggregator aggregate-t1 <model_id> --submit
+```
+
+**Model Owner** opens the T1 reveal window:
+
+```bash
+dincli model-owner aggregation T1 start-reveal <model_id>
+```
+
+**Aggregators** reveal their committed T1 aggregation (repeat for each aggregator, on the same machine/cache the commit was made from):
+
+```bash
+dincli aggregator reveal-t1 <model_id>
 ```
 
 **Model Owner** closes T1 and starts T2 aggregation:
@@ -397,19 +420,31 @@ dincli aggregator aggregate-t1 <model_id> --submit
 dincli model-owner aggregation show-t1-batches <model_id> --detailed
 # close t1 aggregation
 dincli model-owner aggregation T1 close <model_id>
-# start t2 aggregation
+# start t2 aggregation (opens the commit window)
 dincli model-owner aggregation T2 start <model_id>
 # show t2 batches
 dincli model-owner aggregation show-t2-batches <model_id> --detailed
 ```
 
-**Aggregators** perform T2 aggregation (repeat for each aggregator):
+**Aggregators** commit their T2 aggregation (repeat for each aggregator):
 
 ```bash
 # show the aggregator its assigned t2 batches
 dincli aggregator show-t2-batches <model_id> --detailed
-# aggregate the assigned t2 batches
+# aggregate and commit the assigned t2 batches
 dincli aggregator aggregate-t2 <model_id> --submit
+```
+
+**Model Owner** opens the T2 reveal window:
+
+```bash
+dincli model-owner aggregation T2 start-reveal <model_id>
+```
+
+**Aggregators** reveal their committed T2 aggregation (repeat for each aggregator, on the same machine/cache the commit was made from):
+
+```bash
+dincli aggregator reveal-t2 <model_id>
 ```
 
 **Model Owner** closes T2 aggregation:

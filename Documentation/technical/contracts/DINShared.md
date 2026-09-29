@@ -44,16 +44,18 @@ Value  State Name                          Description
  14    LMSevaluationRevealStarted          Reveal phase: auditors reveal (score, vote, salt) via `revealAuditScore`; eligibility and median scoring are computed from revealed values only.
  15    LMSevaluationClosed                 Evaluation finalized; approved models identified.
  16    T1nT2Bcreated                       Tier-1 and Tier-2 aggregation batches formed.
- 17    T1AggregationStarted                Tier-1 aggregators can submit their aggregated CIDs.
- 18    T1AggregationDone                   Tier-1 finalized; winning CIDs per batch recorded.
- 19    T2AggregationStarted                Tier-2 aggregators can submit their aggregated CIDs.
- 20    T2AggregationDone                   Tier-2 finalized; global winning CID recorded.
- 21    AuditorsSlashed                     Auditor slashing phase executed.
- 22    AggregatorsSlashed                  Aggregator slashing phase executed.
- 23    GIended                             GI is complete; system is ready for next GI.
+ 17    T1AggregationStarted                Commit phase: Tier-1 aggregators submit hidden CID commitments via `commitT1Aggregation`.
+ 18    T1AggregationRevealStarted          Reveal phase: Tier-1 aggregators reveal (cid, salt) via `revealT1Aggregation`; only revealed CIDs count toward finalization.
+ 19    T1AggregationDone                   Tier-1 finalized; winning CIDs per batch recorded.
+ 20    T2AggregationStarted                Commit phase: Tier-2 aggregators submit hidden CID commitments via `commitT2Aggregation`.
+ 21    T2AggregationRevealStarted          Reveal phase: Tier-2 aggregators reveal (cid, salt) via `revealT2Aggregation`; only revealed CIDs count toward finalization.
+ 22    T2AggregationDone                   Tier-2 finalized; global winning CID recorded.
+ 23    AuditorsSlashed                     Auditor slashing phase executed.
+ 24    AggregatorsSlashed                  Aggregator slashing phase executed.
+ 25    GIended                             GI is complete; system is ready for next GI.
 ```
 
-> **Ordinal note:** `LMSevaluationRevealStarted` (commit-then-reveal auditor scoring, task_210726_6 §2a) sits between `LMSevaluationStarted` and `LMSevaluationClosed` at ordinal 14, shifting every state from `LMSevaluationClosed` onward by +1 relative to the pre-commit-reveal numbering. `dincli/cli/utils.py`'s `states`/`stateDescription` positional mirrors (indexed by this same raw ordinal) have been updated to match — see `dincli/cli/utils.py`'s `states`/`stateDescription` lists.
+> **Ordinal note:** `LMSevaluationRevealStarted` (commit-then-reveal auditor scoring, task_210726_6 §2a) sits between `LMSevaluationStarted` and `LMSevaluationClosed` at ordinal 14. `T1AggregationRevealStarted` and `T2AggregationRevealStarted` (commit-then-reveal T1/T2 aggregation, issue #156 M-1, task_240926_18 Part C) sit at ordinals 18 and 21 respectively, immediately after their corresponding commit-phase state — same insert-in-lifecycle-position precedent, not appended. Each insertion shifts every later ordinal by +1 relative to the prior numbering. `dincli/cli/utils.py`'s `states`/`stateDescription` positional mirrors (indexed by this same raw ordinal) have been updated to match — see `dincli/cli/utils.py`'s `states`/`stateDescription` lists.
 
 ### 2.2 State Transition Diagram
 
@@ -70,38 +72,44 @@ Value  State Name                          Description
 [3] AwaitingGenesisModel
         │ setGenesisModelIpfsHash()
         ▼
-[4] GenesisModelCreated ◄──────────────────────────────── [23] GIended
+[4] GenesisModelCreated ◄──────────────────────────────── [25] GIended
         │ startGI()                                               ▲
         ▼                                                         │ endGI()
-[5] GIstarted                                             [22] AggregatorsSlashed
+[5] GIstarted                                             [24] AggregatorsSlashed
         │ startDINaggregatorsRegistration()                       ▲
         ▼                                                         │ slashAggregators()
-[6] DINaggregatorsRegistrationStarted               [21] AuditorsSlashed
+[6] DINaggregatorsRegistrationStarted               [23] AuditorsSlashed
         │ closeDINaggregatorsRegistration()                       ▲
         ▼                                                         │ slashAuditors()
-[7] DINaggregatorsRegistrationClosed                [20] T2AggregationDone
+[7] DINaggregatorsRegistrationClosed                [22] T2AggregationDone
         │ startDINauditorsRegistration()                          ▲
         ▼                                                         │ finalizeT2Aggregation()
-[8] DINauditorsRegistrationStarted                  [19] T2AggregationStarted
+[8] DINauditorsRegistrationStarted                  [21] T2AggregationRevealStarted
         │ closeDINauditorsRegistration()                          ▲
-        ▼                                                         │ startT2Aggregation()
-[9] DINauditorsRegistrationClosed                   [18] T1AggregationDone
+        ▼                                                         │ startT2AggregationReveal()
+[9] DINauditorsRegistrationClosed                   [20] T2AggregationStarted
         │ startLMsubmissions()                                    ▲
-        ▼                                                         │ finalizeT1Aggregation()
-[10] LMSstarted                                     [17] T1AggregationStarted
+        ▼                                                         │ startT2Aggregation()
+[10] LMSstarted                                     [19] T1AggregationDone
         │ closeLMsubmissions()                                    ▲
-        ▼                                                         │ startT1Aggregation()
-[11] LMSclosed                                      [16] T1nT2Bcreated
+        ▼                                                         │ finalizeT1Aggregation()
+[11] LMSclosed                                      [18] T1AggregationRevealStarted
         │ createAuditorsBatches()                                 ▲
-        ▼                                                         │ autoCreateTier1AndTier2()
-[12] AuditorsBatchesCreated                         [15] LMSevaluationClosed
+        ▼                                                         │ startT1AggregationReveal()
+[12] AuditorsBatchesCreated                         [17] T1AggregationStarted
         │ startLMsubmissionsEvaluation()                          ▲
-        ▼                                                         │ closeLMsubmissionsEvaluation()
-[13] LMSevaluationStarted                           [14] LMSevaluationRevealStarted
+        ▼                                                         │ startT1Aggregation()
+[13] LMSevaluationStarted                           [16] T1nT2Bcreated
         │ (auditors: commitAuditScore, commit phase)               ▲
-        └──────────── startLMsubmissionsEvaluationReveal() ────────┘
-                       (auditors: revealAuditScore, reveal phase)
+        └──────────── startLMsubmissionsEvaluationReveal() ────────┤ autoCreateTier1AndTier2()
+                       (auditors: revealAuditScore, reveal phase)  │
+                                                         [15] LMSevaluationClosed
+                                                                    ▲
+                                                                    │ closeLMsubmissionsEvaluation()
+                                                         [14] LMSevaluationRevealStarted
 ```
+
+T1/T2 aggregation submissions follow the same commit-then-reveal shape as LMS evaluation above: `commitT1Aggregation`/`commitT2Aggregation` during the `*AggregationStarted` (commit) state, then the model owner calls `startT1AggregationReveal`/`startT2AggregationReveal` to open `*AggregationRevealStarted`, during which aggregators call `revealT1Aggregation`/`revealT2Aggregation`. Only revealed CIDs are counted by `finalizeT1Aggregation`/`finalizeT2Aggregation`; a committed-but-never-revealed aggregator is excluded from finalization and remains slashable via `slashAggregators`' existing "no submission" (S2) check (issue #156 M-1, task_240926_18 Part C).
 
 ---
 
