@@ -13,9 +13,13 @@ import {DinTreasury} from "../src/DinTreasury.sol";
 import {DinFeeRouter} from "../src/DinFeeRouter.sol";
 import {DinEmission} from "../src/DinEmission.sol";
 
+import {DeploymentsPath} from "./DeploymentsPath.sol";
+
 /// @notice Deploys the seven DIN platform contracts behind Transparent Proxies,
-///         wires them together, and writes foundry/deployments/localhost.json,
-///         which `dincli system import-deployments --foundry` reads as-is.
+///         wires them together, and writes foundry/deployments/<network>.json
+///         (see DeploymentsPath: localhost for anvil, sepolia_op_devnet for
+///         Optimism Sepolia) in the same schema as hardhat/deployments/, so
+///         dincli import-deployments accepts it without modification.
 ///
 /// Tokenomics parameters are read from the environment via vm.envOr, defaulting
 /// to today's in-code values so local deploys and existing tests are unchanged.
@@ -51,9 +55,19 @@ import {DinEmission} from "../src/DinEmission.sol";
 ///     --sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
 ///     --unlocked
 ///
-/// Then import into dincli:
-///   dincli system import-deployments --foundry
-contract DeployPlatform is Script {
+/// On Optimism Sepolia, sign with a keystore account instead of --unlocked
+/// (--unlocked only works against anvil's dev accounts). SEPOLIA_OP_DEVNET_RPC_URL comes
+/// from .env.sepolia_op_devnet (from the repo root: set -a; source .env.sepolia_op_devnet; set +a):
+///   cd foundry && forge script script/DeployPlatform.s.sol \
+///     --rpc-url "$SEPOLIA_OP_DEVNET_RPC_URL" \
+///     --broadcast \
+///     --account <keystore_name> \
+///     --sender <din_representative_address>
+///
+/// Then import into dincli (reads foundry/deployments/<network>.json for the
+/// active dincli network):
+///   dincli system import-deployments
+contract DeployPlatform is DeploymentsPath {
     using stdJson for string;
 
     // ── Tokenomics defaults (match contract initialize values) ────────────────
@@ -106,7 +120,7 @@ contract DeployPlatform is Script {
         Tokenomics memory t = readTokenomics();
         Deployment memory d = deploy(t, msg.sender);
 
-        // 16. Write deployments JSON — read by `dincli system import-deployments --foundry`
+        // 16. Write deployments JSON — read by `dincli system import-deployments`
         _writeDeployments(
             d.dinTreasury,
             d.dinToken,
@@ -409,7 +423,7 @@ contract DeployPlatform is Script {
         string memory outDir = string.concat(vm.projectRoot(), "/deployments");
         vm.createDir(outDir, true);
 
-        string memory outPath = string.concat(outDir, "/localhost.json");
+        string memory outPath = _deploymentsFile("");
         vm.writeJson(finalJson, outPath);
         console.log("Deployments written to:", outPath);
     }
