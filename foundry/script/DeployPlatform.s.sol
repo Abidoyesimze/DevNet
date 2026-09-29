@@ -14,11 +14,18 @@ import {DinFeeRouter} from "../src/DinFeeRouter.sol";
 import {DinEmission} from "../src/DinEmission.sol";
 
 /// @notice Deploys the seven DIN platform contracts behind Transparent Proxies,
-///         wires them together, and writes foundry/deployments/localhost.json.
+///         wires them together, and writes foundry/deployments/localhost.json,
+///         which `dincli system import-deployments --foundry` reads as-is.
 ///
 /// Tokenomics parameters are read from the environment via vm.envOr, defaulting
 /// to today's in-code values so local deploys and existing tests are unchanged.
-/// Override any of these keys in your .env.<network> file for testnet/mainnet.
+/// Every key that is not set logs an "[INFO] ... not set" line, so a missed
+/// env load is visible in the output.
+///
+/// NOTE: forge script only auto-loads foundry/.env. The repo-root .env and
+/// .env.<network> files (used by dincli) are NOT read. Put overrides
+/// in foundry/.env, or export them into the shell before running, e.g.:
+///   set -a; source ../.env.sepolia_op_devnet; set +a
 ///
 /// Env keys (see .env.example for full descriptions):
 ///   DIN_PER_ETH                 — DIN minted per ETH (default: 1_000_000 * 1e18)
@@ -36,7 +43,9 @@ import {DinEmission} from "../src/DinEmission.sol";
 /// Usage (from repo root):
 ///   ./foundry/anvil.sh &
 ///   forge clean
-///   cd foundry && forge script script/DeployPlatform.s.sol \
+///   cd foundry
+///   set -a; source ../.env.<network>; set +a   # optional: tokenomics overrides
+///   forge script script/DeployPlatform.s.sol \
 ///     --rpc-url http://127.0.0.1:8545 \
 ///     --broadcast \
 ///     --sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
@@ -74,12 +83,17 @@ contract DeployPlatform is Script {
         uint256 s5JailDuration   = vm.envOr("S5_JAIL_DURATION",             DEFAULT_S5_JAIL_DURATION);
         uint256 s6Threshold      = vm.envOr("S6_NO_PARTICIPATION_THRESHOLD",DEFAULT_S6_THRESHOLD);
 
-        if (dinPerEth == DEFAULT_DIN_PER_ETH)
-            console.log("[INFO] DIN_PER_ETH not set - using default:", dinPerEth);
-        if (mintCap == DEFAULT_MINT_CAP)
-            console.log("[INFO] MINT_CAP not set - using default (uncapped)");
-        if (minStake == DEFAULT_MIN_STAKE)
-            console.log("[INFO] MIN_STAKE not set - using default:", minStake);
+        _logIfUnset("DIN_PER_ETH",                   dinPerEth);
+        _logIfUnset("MINT_CAP",                      mintCap);
+        _logIfUnset("EMISSION_PER_GI",               emissionPerGI);
+        _logIfUnset("EMISSION_DECAY_BPS",            emissionDecayBps);
+        _logIfUnset("EMISSION_EPOCH_LENGTH",         emissionEpochLen);
+        _logIfUnset("EMISSION_MAX_EPOCHS",           emissionMaxEpochs);
+        _logIfUnset("MIN_STAKE",                     minStake);
+        _logIfUnset("S5_RECIDIVISM_WINDOW",          s5Window);
+        _logIfUnset("S5_RECIDIVISM_THRESHOLD",       s5Threshold);
+        _logIfUnset("S5_JAIL_DURATION",              s5JailDuration);
+        _logIfUnset("S6_NO_PARTICIPATION_THRESHOLD", s6Threshold);
 
         vm.startBroadcast();
 
@@ -247,7 +261,7 @@ contract DeployPlatform is Script {
 
         vm.stopBroadcast();
 
-        // 15. Write deployments JSON — same schema as hardhat/deployments/localhost.json
+        // 16. Write deployments JSON — read by `dincli system import-deployments --foundry`
         _writeDeployments(
             dinTreasuryProxy,
             dinTokenProxy,
@@ -264,6 +278,14 @@ contract DeployPlatform is Script {
             proxyAdminRegistry,
             proxyAdminEmission
         );
+    }
+
+    /// @dev Logs when `key` is absent from the environment, so a missed env
+    ///      load (e.g. forgetting to source .env.<network>) is visible.
+    function _logIfUnset(string memory key, uint256 value) internal view {
+        if (!vm.envExists(key)) {
+            console.log(string.concat("[INFO] ", key, " not set - using default:"), value);
+        }
     }
 
     function _writeDeployments(

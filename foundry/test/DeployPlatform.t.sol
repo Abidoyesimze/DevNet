@@ -12,6 +12,8 @@ import {DinTreasury} from "../src/DinTreasury.sol";
 import {DinFeeRouter} from "../src/DinFeeRouter.sol";
 import {DINTaskAuditor} from "../src/DINTaskAuditor.sol";
 import {DINTaskCoordinator} from "../src/DINTaskCoordinator.sol";
+import {TA_InvalidSlashFraction, TC_InvalidSlashFraction} from "../src/DINShared.sol";
+import {PR146SlashingRegressionTest} from "./PR146SlashingRegression.t.sol";
 
 import {DinTokenV2} from "../src/upgrade/DinTokenV2.sol";
 import {DinCoordinatorV2} from "../src/upgrade/DinCoordinatorV2.sol";
@@ -683,10 +685,8 @@ contract DeployPlatformTokenomicsOverrideTest is PlatformTest {
 }
 
 // ─── §3b S1/S2 zero-bps regression tests (issue #155) ────────────────────────
-// These tests do not inherit PlatformTest to avoid the OZ upgrades-core
-// build-info scan that triggers a "multiple contracts" error when two build-info
-// files exist (a known issue after incremental builds). Task contracts are
-// deployed without proxies since the setter guards are non-upgradeable logic.
+// The setter guards are plain (non-upgradeable) task-contract logic, so the
+// task contracts are deployed directly, without the platform or proxies.
 
 contract SlashFractionZeroBpsTest is Test {
     DINTaskCoordinator tc;
@@ -699,22 +699,22 @@ contract SlashFractionZeroBpsTest is Test {
     }
 
     function test_setS1SlashFractionBps_rejectsZero() public {
-        vm.expectRevert();
+        vm.expectRevert(TA_InvalidSlashFraction.selector);
         ta.setS1SlashFractionBps(0);
     }
 
     function test_setS2SlashFractionBps_rejectsZero() public {
-        vm.expectRevert();
+        vm.expectRevert(TC_InvalidSlashFraction.selector);
         tc.setS2SlashFractionBps(0);
     }
 
     function test_setS1SlashFractionBps_rejectsAbove10000() public {
-        vm.expectRevert();
+        vm.expectRevert(TA_InvalidSlashFraction.selector);
         ta.setS1SlashFractionBps(10_001);
     }
 
     function test_setS2SlashFractionBps_rejectsAbove10000() public {
-        vm.expectRevert();
+        vm.expectRevert(TC_InvalidSlashFraction.selector);
         tc.setS2SlashFractionBps(10_001);
     }
 
@@ -734,5 +734,35 @@ contract SlashFractionZeroBpsTest is Test {
 
     function test_setS2SlashFractionBps_defaultIsNonZero() public view {
         assertGt(tc.s2SlashFractionBps(), 0, "s2SlashFractionBps always > 0 after deploy");
+    }
+}
+
+// ─── §3b S1/S2 zero-amount rounding path (issue #155) ────────────────────────
+// With MIN_STAKE < 10_000 wei, MIN_STAKE * bps / 10_000 rounds to 0 even with a
+// non-zero fraction. slashPartial reverts InvalidSlashAmount on 0, so before
+// the fix slashAuditors / slashAggregators reverted and the GI could not
+// advance. Reuses the PR146 GI harness (batch-1 auditors miss their votes,
+// agg3 misses its T1 submission); inheriting it also re-runs its 3 tests here.
+
+contract SlashZeroAmountRoundingTest is PR146SlashingRegressionTest {
+    function test_roundingPath_S1S2_zeroAmount_doesNotBrick() public {
+        address[] memory auditors = _runToSlashAuditors(6);
+
+        vm.prank(admin);
+        stake.setMinStake(1);
+        // Precondition: both computed slash amounts round to 0.
+        assertEq((stake.MIN_STAKE() * ta.s1SlashFractionBps()) / 10_000, 0, "s1Amount rounds to 0");
+        assertEq((stake.MIN_STAKE() * tc.s2SlashFractionBps()) / 10_000, 0, "s2Amount rounds to 0");
+
+        uint256 audBefore = stake.getStake(auditors[3]);
+        uint256 aggBefore = stake.getStake(agg3);
+
+        vm.startPrank(modelOwner);
+        tc.slashAuditors(1);    // batch-1 auditors missed votes (S1)
+        tc.slashAggregators(1); // agg3 missed its T1 submission (S2)
+        vm.stopPrank();
+
+        assertEq(stake.getStake(auditors[3]), audBefore, "zero S1 amount moves no stake");
+        assertEq(stake.getStake(agg3), aggBefore, "zero S2 amount moves no stake");
     }
 }

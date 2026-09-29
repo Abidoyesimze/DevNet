@@ -147,7 +147,7 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
     ///         is allowed to cost auditors stake, per MECHANISM_DESIGN.md §6.
     bool public s3SlashingEnabled = false;
 
-    /// @notice S1 liveness-fault slash fraction in basis points (0–10000).
+    /// @notice S1 liveness-fault slash fraction in basis points (1–10000).
     ///         Applied to AUD_NO_VOTE (missed audit vote) slashes only.
     ///         S3 deviation slashes keep a full minStake() amount regardless.
     ///         30% default: three consecutive misses ~= full floor stake,
@@ -203,7 +203,7 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
     /// @dev Only affects AUD_NO_VOTE slashes. S3 deviation slashes keep
     ///      the full minStake() amount. Setting to 10000 restores the previous
     ///      flat-minStake behavior.
-    /// @param bps New fraction in basis points (0–10000).
+    /// @param bps New fraction in basis points (1–10000).
     function setS1SlashFractionBps(uint256 bps) external onlyOwner {
         if (bps == 0 || bps > 10_000) revert TA_InvalidSlashFraction();
         uint256 old = s1SlashFractionBps;
