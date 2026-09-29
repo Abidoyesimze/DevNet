@@ -161,3 +161,32 @@ def test_reanchor_during_lock_recurses_instead_of_proceeding_with_zero_seed(mock
     assert mock_build_and_send_tx.call_count == 2
     assert state["lock_calls"] == [GI, GI]
     assert state["seed"] == LOCKED_SEED
+
+
+@patch("dincli.cli.utils.build_and_send_tx")
+def test_lock_call_race_does_not_abort_once_seed_is_set(mock_build_and_send_tx):
+    """PR #191 review, finding No. 5: if someone else's lock lands between
+    our re-check and our own lock tx, our tx reverts with
+    TC_...SeedAlreadyLocked. That must not abort the whole create command --
+    the seed is locked either way, so the lock call passes
+    exit_on_failure=False and re-checks afterward instead of propagating."""
+    state = {"seed": ZERO_SEED, "seed_block": 100, "lock_calls": []}
+    contract = _make_contract(state)
+    w3 = _make_w3(150)
+    ctx, console = _make_ctx(w3)
+
+    def _lock_side_effect(*args, **kwargs):
+        # Our own tx reverted (build_and_send_tx already caught it and
+        # returned None, since exit_on_failure=False) while a concurrent
+        # caller's lock tx landed first.
+        state["seed"] = LOCKED_SEED
+        return None
+
+    mock_build_and_send_tx.side_effect = _lock_side_effect
+
+    _call(ctx, contract)
+
+    mock_build_and_send_tx.assert_called_once()
+    _, kwargs = mock_build_and_send_tx.call_args
+    assert kwargs.get("exit_on_failure") is False
+    assert state["seed"] == LOCKED_SEED

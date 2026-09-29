@@ -1037,23 +1037,32 @@ def ensure_batch_seed_locked(
         console.print(f"[dim]{label} seed was locked by someone else while waiting[/dim]")
         return
 
+    # exit_on_failure=False: if someone else locks between our re-check
+    # above and this tx landing, this call reverts with
+    # TC_...SeedAlreadyLocked -- exiting on that would abort the whole
+    # create command even though the seed is now locked and create would
+    # succeed (PR #191 review, finding No. 5). Re-check below covers it.
     build_and_send_tx(
         ctx,
         getattr(task_coordinator_contract.functions, lock_fn)(gi),
         f"Locking {label} seed",
         f"{label.capitalize()} seed locked",
         f"Failed to lock {label} seed",
-        exit_on_failure=True,
+        exit_on_failure=False,
     )
 
-    # The lock call itself re-anchors (rather than setting the seed) if
-    # >256 blocks elapsed since the last anchor -- recurse once to wait for
-    # the freshly-anchored block instead of proceeding with a zero seed.
-    if _current_seed() == b"\x00" * 32:
-        ensure_batch_seed_locked(
-            ctx, task_coordinator_contract, gi,
-            seed_getter, seed_block_getter, lock_fn, label, poll_interval,
-        )
+    if _current_seed() != b"\x00" * 32:
+        return
+
+    # Seed is still unset: either the lock call itself re-anchored (rather
+    # than setting the seed, because >256 blocks elapsed since the last
+    # anchor) or it reverted for a reason a retry can recover from (e.g.
+    # the race above). Recurse once to wait for the (possibly freshly
+    # re-anchored) block instead of proceeding with a zero seed.
+    ensure_batch_seed_locked(
+        ctx, task_coordinator_contract, gi,
+        seed_getter, seed_block_getter, lock_fn, label, poll_interval,
+    )
 
 
 def print_tx_info(tx_hash, network=None, print_url = True):

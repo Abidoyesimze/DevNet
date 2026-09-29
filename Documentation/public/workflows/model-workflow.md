@@ -334,7 +334,10 @@ The Model Owner prepares evaluation batches and test data, then auditors evaluat
 > land in which batch). This adds a short automatic pause (a handful of
 > blocks, ~seconds on Optimism Sepolia) before the command proceeds — no
 > extra action needed, and if another process already locked the seed
-> first, the wait is skipped entirely.
+> first, the wait is skipped entirely. On the `local` network this
+> requires an anvil instance producing blocks on its own (`foundry/anvil.sh`
+> passes `--block-time`) — an idle anvil started without block production
+> never mines the anchor block, and the wait never ends.
 
 ```bash
 # create evaluation batches
@@ -384,7 +387,7 @@ Eligible local models are aggregated hierarchically. Tier 1 (T1) aggregation com
 > Same as `auditor-batches create` above, `aggregation create-t1nt2-batches`
 > waits for and locks its own ungrindable, future-block-anchored seed
 > (issue #156) before creating T1/T2 batches. Automatic short pause, no
-> extra action needed.
+> extra action needed — same `local`-network block-production caveat.
 
 ```bash
 # create t1 and t2 batches

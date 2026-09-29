@@ -160,15 +160,15 @@ function submitLocalModel(bytes32 _clientModel, uint _GI) public onlyCurrentGI(_
 
 ## 8. Audit Batch Formation
 
-### `createAuditorsBatches`
+### `createAuditorsBatches(uint _GI, bytes32 seed)`
 
-Called by `DINTaskCoordinator` after LM submission closes (`GIstate == LMSclosed`).
+Called by `DINTaskCoordinator` after LM submission closes (`GIstate == LMSclosed`). `seed` is the coordinator's locked, ungrindable `auditSeed[_GI]` (issue #156 H-2, task_240926_18 Part B) — see `DINTaskCoordinator.md`'s `lockAuditSeed` section for how it's produced. Reverts with `TA_AuditSeedNotLocked` if `seed == bytes32(0)`, independent defense-in-depth on top of the coordinator's own check before it calls in (same precedent as M-3).
 
 **Algorithm:**
 
 1. Filter the historical registration list `dinAuditors[_GI]` down to auditors still `isValidatorActive` at call time (`_activeAuditorPool`). Revert (`TA_NotEnoughAuditors`) if fewer than `params.auditorsPerBatch` remain active.
-2. Shuffle the active pool (Fisher-Yates, storage) using `blockhash(block.number - 1)` as entropy.
-3. Build `uint[]` of model indexes `[0..N-1]`. Shuffle (memory) using `block.timestamp + msg.sender`.
+2. Shuffle the active pool (Fisher-Yates, storage, `pure`) using `keccak256(seed, "AUD_ADDR")` as entropy.
+3. Build `uint[]` of model indexes `[0..N-1]`. Shuffle (memory, `pure`) using `keccak256(seed, "AUD_IDX")`.
 4. Greedy batch formation:
    ```
    while vPtr + auditorsPerBatch <= aLen
@@ -182,7 +182,7 @@ Called by `DINTaskCoordinator` after LM submission closes (`GIstate == LMSclosed
    ```
 5. Emit `AuditorsBatchesCreated`.
 
-> ⚠️ **PRNG Warning:** `blockhash` and `block.timestamp` are weak on-chain entropy sources, manipulable by block producers. Replace with Chainlink VRF in production.
+> **Residual trust note:** the seed is derived from `blockhash(seedBlock)`, so on OP Stack this still trusts the sequencer not to grind — same caveat as the dispute seed (`DINTaskCoordinator.md`'s `lockDisputeSeed`). Two narrower gaps remain even with the seed locked: the model owner can decline to lock a seed they don't like and let it re-anchor (repeatable stalling, capped at roughly one re-roll per ~256-block window), and a validator can still reshape the active pool by unstaking *after* the seed is locked but *before* `createAuditorsBatches` is called, since `_activeAuditorPool` is evaluated at call time. Tracked as residuals on issue #156, not yet a separate backlog entry as of this writing — see the PR #191 review discussion. VRF remains the mainnet-grade follow-up (issue #178).
 
 ---
 
