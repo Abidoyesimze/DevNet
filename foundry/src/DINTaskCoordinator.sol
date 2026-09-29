@@ -54,11 +54,18 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     mapping(uint => mapping(uint => mapping(address => bool))) isTier1Aggregator;
 
     // Audit & voting maps            GI  ➜  batchId ➜ validator  ➜  …
+    // t1SubmissionCID/t1Submitted are written at REVEAL time only (issue #156
+    // M-1, task_240926_18 Part C commit-then-reveal) -- a committed-but-
+    // never-revealed aggregator leaves t1Submitted false, which is exactly
+    // what slashAggregators()'s existing "no submission" (S2) check already
+    // reads, so that loop needed no changes for the commit-reveal split.
     mapping(uint => mapping(uint => mapping(address => bytes32)))
         public t1SubmissionCID;
     mapping(uint => mapping(uint => mapping(address => bool)))
         public t1Submitted;
     mapping(uint => mapping(uint => mapping(bytes32 => uint))) public t1Votes; // CID ➜ votes
+    mapping(uint => mapping(uint => mapping(address => bytes32))) public t1CommitHash;
+    mapping(uint => mapping(uint => mapping(address => bool))) public t1Committed;
 
     struct Tier2Batch {
         uint batchId;
@@ -76,6 +83,8 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     mapping(uint => mapping(uint => mapping(address => bool)))
         public t2Submitted;
     mapping(uint => mapping(uint => mapping(bytes32 => uint))) public t2Votes;
+    mapping(uint => mapping(uint => mapping(address => bytes32))) public t2CommitHash;
+    mapping(uint => mapping(uint => mapping(address => bool))) public t2Committed;
 
     /// @notice Per-aggregator count of finalized T1/T2 batches they were
     ///         assigned to in a GI, one increment per (aggregator,
@@ -237,7 +246,9 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     /// @notice Emitted on every GI state transition.
     /// @dev GI is 0 during constructor/setup transitions (ordinals 0–4); expected.
     event GIStateChanged(uint indexed GI, uint8 indexed newState);
+    event T1AggregationCommitted(uint indexed GI, uint indexed batchId, address indexed aggregator, bytes32 commitHash);
     event T1AggregationSubmitted(uint indexed GI, uint indexed batchId, address indexed aggregator, bytes32 cid);
+    event T2AggregationCommitted(uint indexed GI, uint indexed batchId, address indexed aggregator, bytes32 commitHash);
     event T2AggregationSubmitted(uint indexed GI, uint indexed batchId, address indexed aggregator, bytes32 cid);
     event T1BatchFinalized(uint indexed GI, uint indexed batchId, bytes32 winningCID);
     event T2Finalized(uint indexed GI, bytes32 globalModelCID);
@@ -727,7 +738,8 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     }
 
     /// @notice Transitions GI state to T1AggregationStarted, opening the
-    ///         Tier-1 submission window for assigned aggregators.
+    ///         Tier-1 commit window for assigned aggregators
+    ///         (commitT1Aggregation).
     /// @param _GI Current GI index.
     function startT1Aggregation(
         uint _GI
@@ -737,19 +749,78 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         _setGIstate(GIstates.T1AggregationStarted);
     }
 
-    /// @notice Submits an aggregation result CID for a Tier-1 batch.
-    /// @dev Caller must be an assigned, active aggregator who has not already submitted.
-    ///      Votes are tallied per CID; the majority CID is selected at finalization.
+    /// @notice Phase 1 of commit-then-reveal Tier-1 aggregation: lock in a
+    ///         hidden aggregation CID.
+    /// @dev Caller must be an assigned, active aggregator who has not already
+    ///      committed. `commitHash` must equal keccak256(abi.encode(cid,
+    ///      salt, msg.sender, GI, TierKind.Tier1, batchId)) for the values
+    ///      revealed later -- binding the committer's own address (and GI/
+    ///      tier/batchId) into the hash, unlike PR #63's auditor-side
+    ///      commitHash, closes the "replay a peer's commit hash and reveal
+    ///      their own (cid, salt) under it after they reveal" free-riding
+    ///      path (issue #156 M-1). The contract cannot and does not validate
+    ///      this at commit time -- that's the point.
     /// @param _GI Current GI index.
     /// @param _batchId Tier-1 batch index.
-    /// @param _aggregationCID IPFS CID of the aggregated model weights, encoded as bytes32.
-    function submitT1Aggregation(
+    /// @param commitHash keccak256(abi.encode(cid, salt, msg.sender, GI, TierKind.Tier1, batchId)).
+    function commitT1Aggregation(
         uint _GI,
         uint _batchId,
-        bytes32 _aggregationCID
+        bytes32 commitHash
     ) external onlyCurrentGI(_GI) {
         if (GIstate != GIstates.T1AggregationStarted)
             revert TC_T1AggregationNotStarted();
+        if (_batchId >= tier1Batches[_GI].length) revert TC_InvalidBatch();
+        if (!isTier1Aggregator[_GI][_batchId][msg.sender])
+            revert TC_NotBatchAggregator();
+        if (!dinvalidatorStakeContract.isValidatorActive(msg.sender)) {
+            revert TC_AggregatorNotActive();
+        }
+        if (commitHash == bytes32(0)) revert TC_T1EmptyCommitHash();
+        if (t1Committed[_GI][_batchId][msg.sender])
+            revert TC_T1AlreadyCommitted();
+
+        t1CommitHash[_GI][_batchId][msg.sender] = commitHash;
+        t1Committed[_GI][_batchId][msg.sender] = true;
+
+        emit T1AggregationCommitted(_GI, _batchId, msg.sender, commitHash);
+    }
+
+    /// @notice Closes the T1 commit window and opens the reveal window so
+    ///         assigned aggregators can call revealT1Aggregation.
+    /// @dev Must run strictly after commits close and before any reveal is
+    ///      accepted -- see revealT1Aggregation's GIstate gate.
+    /// @param _GI Current GI index.
+    function startT1AggregationReveal(
+        uint _GI
+    ) external onlyOwner onlyCurrentGI(_GI) {
+        if (GIstate != GIstates.T1AggregationStarted)
+            revert TC_T1RevealCannotBeStarted();
+        _setGIstate(GIstates.T1AggregationRevealStarted);
+    }
+
+    /// @notice Phase 2 of commit-then-reveal: reveal the (cid, salt) behind a
+    ///         prior commitment and have it counted.
+    /// @dev Reverts unless the caller committed for this (GI, batchId) and the
+    ///      revealed values hash to that commitment. Open only while
+    ///      GIstate == T1AggregationRevealStarted, strictly after the commit
+    ///      window has been closed by the model owner. An aggregator who
+    ///      committed but never reveals simply never sets t1Submitted, so
+    ///      they're excluded from finalization and remain slashable via the
+    ///      existing slashAggregators() "no submission" (S2) check -- no
+    ///      special-casing needed for the non-reveal case.
+    /// @param _GI Current GI index.
+    /// @param _batchId Tier-1 batch index.
+    /// @param _aggregationCID IPFS CID of the aggregated model weights, encoded as bytes32.
+    /// @param salt Arbitrary value chosen at commit time to prevent hash pre-image search.
+    function revealT1Aggregation(
+        uint _GI,
+        uint _batchId,
+        bytes32 _aggregationCID,
+        bytes32 salt
+    ) external onlyCurrentGI(_GI) {
+        if (GIstate != GIstates.T1AggregationRevealStarted)
+            revert TC_T1RevealPhaseNotOpen();
         if (_batchId >= tier1Batches[_GI].length) revert TC_InvalidBatch();
 
         // Verify sender is an assigned aggregator
@@ -758,9 +829,16 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         if (!dinvalidatorStakeContract.isValidatorActive(msg.sender)) {
             revert TC_AggregatorNotActive();
         }
+        if (!t1Committed[_GI][_batchId][msg.sender]) revert TC_T1NoCommitFound();
         if (t1Submitted[_GI][_batchId][msg.sender])
             revert TC_AlreadySubmitted();
         if (_aggregationCID == bytes32(0)) revert TC_ZeroCID();
+
+        bytes32 expectedHash = keccak256(
+            abi.encode(_aggregationCID, salt, msg.sender, _GI, TierKind.Tier1, _batchId)
+        );
+        if (expectedHash != t1CommitHash[_GI][_batchId][msg.sender])
+            revert TC_T1RevealHashMismatch();
 
         t1Submitted[_GI][_batchId][msg.sender] = true;
         t1SubmissionCID[_GI][_batchId][msg.sender] = _aggregationCID;
@@ -770,14 +848,14 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         t1Votes[_GI][_batchId][_aggregationCID]++;
     }
 
-    /// @notice Closes the Tier-1 submission window and selects the majority CID
+    /// @notice Closes the Tier-1 reveal window and selects the majority CID
     ///         for every batch.
     /// @dev Iterates all T1 batches; reverts on the first batch that has no submissions.
     /// @param _GI Current GI index.
     function finalizeT1Aggregation(
         uint _GI
     ) external onlyOwner onlyCurrentGI(_GI) {
-        if (GIstate != GIstates.T1AggregationStarted)
+        if (GIstate != GIstates.T1AggregationRevealStarted)
             revert TC_NotReadyToFinalizeT1();
 
         Tier1Batch[] storage batches = tier1Batches[_GI];
@@ -825,7 +903,8 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         _setGIstate(GIstates.T1AggregationDone);
     }
 
-    /// @notice Opens the Tier-2 aggregation submission window.
+    /// @notice Opens the Tier-2 aggregation commit window
+    ///         (commitT2Aggregation).
     /// @param _GI Current GI index.
     function startT2Aggregation(
         uint _GI
@@ -835,19 +914,65 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         _setGIstate(GIstates.T2AggregationStarted);
     }
 
-    /// @notice Submits an aggregation result CID for the Tier-2 batch.
-    /// @dev _batchId must be 0. Caller must be an assigned, active aggregator who
-    ///      has not already submitted.
+    /// @notice Phase 1 of commit-then-reveal Tier-2 aggregation: lock in a
+    ///         hidden aggregation CID.
+    /// @dev Same sender-bound commit-hash hardening as commitT1Aggregation
+    ///      (issue #156 M-1); see that function's NatSpec.
     /// @param _GI Current GI index.
     /// @param _batchId Must be 0.
-    /// @param _aggregationCID IPFS CID of the final aggregated model, encoded as bytes32.
-    function submitT2Aggregation(
+    /// @param commitHash keccak256(abi.encode(cid, salt, msg.sender, GI, TierKind.Tier2, batchId)).
+    function commitT2Aggregation(
         uint _GI,
         uint _batchId,
-        bytes32 _aggregationCID
+        bytes32 commitHash
     ) external onlyCurrentGI(_GI) {
         if (GIstate != GIstates.T2AggregationStarted)
             revert TC_T2AggregationNotStarted();
+        if (_batchId != 0) revert TC_OnlyOneTier2Batch();
+        if (!isTier2Aggregator[_GI][_batchId][msg.sender])
+            revert TC_NotBatchAggregator();
+        if (!dinvalidatorStakeContract.isValidatorActive(msg.sender)) {
+            revert TC_AggregatorNotActive();
+        }
+        if (commitHash == bytes32(0)) revert TC_T2EmptyCommitHash();
+        if (t2Committed[_GI][_batchId][msg.sender])
+            revert TC_T2AlreadyCommitted();
+
+        t2CommitHash[_GI][_batchId][msg.sender] = commitHash;
+        t2Committed[_GI][_batchId][msg.sender] = true;
+
+        emit T2AggregationCommitted(_GI, _batchId, msg.sender, commitHash);
+    }
+
+    /// @notice Closes the T2 commit window and opens the reveal window so
+    ///         assigned aggregators can call revealT2Aggregation.
+    /// @param _GI Current GI index.
+    function startT2AggregationReveal(
+        uint _GI
+    ) external onlyOwner onlyCurrentGI(_GI) {
+        if (GIstate != GIstates.T2AggregationStarted)
+            revert TC_T2RevealCannotBeStarted();
+        _setGIstate(GIstates.T2AggregationRevealStarted);
+    }
+
+    /// @notice Phase 2 of commit-then-reveal: reveal the (cid, salt) behind a
+    ///         prior commitment and have it counted.
+    /// @dev _batchId must be 0. Same non-reveal handling as revealT1Aggregation
+    ///      (see its NatSpec) -- a committed-but-never-revealed aggregator
+    ///      simply never sets t2Submitted, and remains slashable via
+    ///      slashAggregators()'s existing "no submission" (S2) check.
+    /// @param _GI Current GI index.
+    /// @param _batchId Must be 0.
+    /// @param _aggregationCID IPFS CID of the final aggregated model, encoded as bytes32.
+    /// @param salt Arbitrary value chosen at commit time to prevent hash pre-image search.
+    function revealT2Aggregation(
+        uint _GI,
+        uint _batchId,
+        bytes32 _aggregationCID,
+        bytes32 salt
+    ) external onlyCurrentGI(_GI) {
+        if (GIstate != GIstates.T2AggregationRevealStarted)
+            revert TC_T2RevealPhaseNotOpen();
         if (_batchId != 0) revert TC_OnlyOneTier2Batch();
 
         if (!isTier2Aggregator[_GI][_batchId][msg.sender])
@@ -855,9 +980,16 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         if (!dinvalidatorStakeContract.isValidatorActive(msg.sender)) {
             revert TC_AggregatorNotActive();
         }
+        if (!t2Committed[_GI][_batchId][msg.sender]) revert TC_T2NoCommitFound();
         if (t2Submitted[_GI][_batchId][msg.sender])
             revert TC_AlreadySubmitted();
         if (_aggregationCID == bytes32(0)) revert TC_ZeroCID();
+
+        bytes32 expectedHash = keccak256(
+            abi.encode(_aggregationCID, salt, msg.sender, _GI, TierKind.Tier2, _batchId)
+        );
+        if (expectedHash != t2CommitHash[_GI][_batchId][msg.sender])
+            revert TC_T2RevealHashMismatch();
 
         t2Submitted[_GI][_batchId][msg.sender] = true;
         t2SubmissionCID[_GI][_batchId][msg.sender] = _aggregationCID;
@@ -867,13 +999,13 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         t2Votes[_GI][_batchId][_aggregationCID]++;
     }
 
-    /// @notice Closes the Tier-2 submission window and selects the majority CID.
+    /// @notice Closes the Tier-2 reveal window and selects the majority CID.
     /// @dev Reverts if the Tier-2 batch has received no submissions.
     /// @param _GI Current GI index.
     function finalizeT2Aggregation(
         uint _GI
     ) external onlyOwner onlyCurrentGI(_GI) {
-        if (GIstate != GIstates.T2AggregationStarted)
+        if (GIstate != GIstates.T2AggregationRevealStarted)
             revert TC_NotReadyToFinalizeT2();
 
         Tier2Batch[] storage batches = tier2Batches[_GI];
