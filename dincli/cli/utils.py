@@ -1054,15 +1054,23 @@ def ensure_batch_seed_locked(
     if _current_seed() != b"\x00" * 32:
         return
 
-    # Seed is still unset: either the lock call itself re-anchored (rather
-    # than setting the seed, because >256 blocks elapsed since the last
-    # anchor) or it reverted for a reason a retry can recover from (e.g.
-    # the race above). Recurse once to wait for the (possibly freshly
-    # re-anchored) block instead of proceeding with a zero seed.
-    ensure_batch_seed_locked(
-        ctx, task_coordinator_contract, gi,
-        seed_getter, seed_block_getter, lock_fn, label, poll_interval,
-    )
+    # Seed is still unset. Distinguish the two outcomes a retry can
+    # actually recover from -- a re-anchor, or the lock race handled above
+    # -- from a genuine, non-recoverable failure (no gas funds, RPC down,
+    # any revert other than a lock race). Recursing unconditionally here
+    # turned every persistent failure into an immediate retry loop (the
+    # seed block is already mined, so there's nothing to wait for) ending
+    # in a RecursionError instead of a clean exit (PR #191 review, finding
+    # No. 6) -- only recurse if the seed block actually moved.
+    new_seed_block = getattr(task_coordinator_contract.functions, seed_block_getter)(gi).call()
+    if new_seed_block != seed_block:
+        ensure_batch_seed_locked(
+            ctx, task_coordinator_contract, gi,
+            seed_getter, seed_block_getter, lock_fn, label, poll_interval,
+        )
+        return
+
+    raise typer.Exit(1)
 
 
 def print_tx_info(tx_hash, network=None, print_url = True):

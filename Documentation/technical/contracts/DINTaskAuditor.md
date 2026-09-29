@@ -167,7 +167,7 @@ Called by `DINTaskCoordinator` after LM submission closes (`GIstate == LMSclosed
 **Algorithm:**
 
 1. Filter the historical registration list `dinAuditors[_GI]` down to auditors still `isValidatorActive` at call time (`_activeAuditorPool`). Revert (`TA_NotEnoughAuditors`) if fewer than `params.auditorsPerBatch` remain active.
-2. Shuffle the active pool (Fisher-Yates, storage, `pure`) using `keccak256(seed, "AUD_ADDR")` as entropy.
+2. Shuffle the active pool (Fisher-Yates, `pure`) using `keccak256(seed, "AUD_ADDR")` as entropy.
 3. Build `uint[]` of model indexes `[0..N-1]`. Shuffle (memory, `pure`) using `keccak256(seed, "AUD_IDX")`.
 4. Greedy batch formation:
    ```
@@ -182,7 +182,7 @@ Called by `DINTaskCoordinator` after LM submission closes (`GIstate == LMSclosed
    ```
 5. Emit `AuditorsBatchesCreated`.
 
-> **Residual trust note:** the seed is derived from `blockhash(seedBlock)`, so on OP Stack this still trusts the sequencer not to grind — same caveat as the dispute seed (`DINTaskCoordinator.md`'s `lockDisputeSeed`). Two narrower gaps remain even with the seed locked: the model owner can decline to lock a seed they don't like and let it re-anchor (repeatable stalling, capped at roughly one re-roll per ~256-block window), and a validator can still reshape the active pool by unstaking *after* the seed is locked but *before* `createAuditorsBatches` is called, since `_activeAuditorPool` is evaluated at call time. Tracked as residuals on issue #156, not yet a separate backlog entry as of this writing — see the PR #191 review discussion. VRF remains the mainnet-grade follow-up (issue #178).
+> **Residual trust note:** the seed is derived from `blockhash(seedBlock)`, so on OP Stack this still trusts the sequencer not to grind — same caveat as the dispute seed (`DINTaskCoordinator.md`'s `lockDisputeSeed`). Two narrower gaps remain even with the seed locked: the model owner can decline to lock a seed they don't like and let it re-anchor (repeatable stalling, capped at roughly one re-roll per ~256-block window), and a validator can still reshape the active pool by unstaking *after* the seed is locked but *before* `createAuditorsBatches` is called, since `_activeAuditorPool` is evaluated at call time. Tracked as [BL-26](../../../Developer/BACK_LOG.md) in `Developer/BACK_LOG.md`. VRF remains the mainnet-grade follow-up (issue #178).
 
 ---
 

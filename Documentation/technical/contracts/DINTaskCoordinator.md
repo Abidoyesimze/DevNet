@@ -213,7 +213,7 @@ Called after LM evaluation closes (`LMSevaluationClosed`). Reverts with `TC_AggS
 
 1. **Load aggregator pool:** filter the historical registration list `dinAggregators[_GI]` down to aggregators still `isValidatorActive` at call time (`_activeAggregatorPool`). Revert `TC_NotEnoughValidators` if the active count is below `T1_AGGREGATORS_PER_BATCH`.
 
-2. **Shuffle aggregators (Fisher-Yates, storage, `pure`):**
+2. **Shuffle aggregators (Fisher-Yates, `pure`):**
    ```
    j = keccak256(keccak256(aggSeed[_GI], "AGG_ADDR"), i, arr.length) % (i+1)
    ```
@@ -357,7 +357,7 @@ Two internal shuffle helpers (`pure`, taking an explicit `bytes32 seed`) mirror 
 
 | Function | Target | Entropy |
 |----------|--------|---------|
-| `_shuffleAddressArray` (storage) | Active aggregator pool | `keccak256(seed, "AGG_ADDR")` (`autoCreateTier1AndTier2`) or the dispute seed's own domain tag (`_assignFreshSubgroup`) |
+| `_shuffleAddressArray` | Active aggregator pool | `keccak256(seed, "AGG_ADDR")` (`autoCreateTier1AndTier2`) or the dispute seed's own domain tag (`_assignFreshSubgroup`) |
 | `_shuffleUintArray` (memory) | Model index pool | `keccak256(seed, "AGG_IDX")` |
 
 Both use Fisher-Yates algorithm. `aggSeed[_GI]` / `auditSeed[_GI]` (§11.1) replaced `blockhash(block.number - 1)` / `block.timestamp + msg.sender` as of issue #156 H-2 (task_240926_18 Part B) — see Security Considerations below for what the fix does and doesn't close.

@@ -8,6 +8,9 @@ instead of setting it (>256 blocks elapsed since anchor).
 """
 from unittest.mock import MagicMock, patch
 
+import pytest
+import typer
+
 from dincli.cli.utils import ensure_batch_seed_locked
 
 ZERO_SEED = b"\x00" * 32
@@ -190,3 +193,32 @@ def test_lock_call_race_does_not_abort_once_seed_is_set(mock_build_and_send_tx):
     _, kwargs = mock_build_and_send_tx.call_args
     assert kwargs.get("exit_on_failure") is False
     assert state["seed"] == LOCKED_SEED
+
+
+@patch("dincli.cli.utils.build_and_send_tx")
+def test_persistent_lock_failure_exits_after_one_attempt(mock_build_and_send_tx):
+    """PR #191 review, finding No. 6: the No. 5 fix (exit_on_failure=False,
+    recurse if the seed is still unset) turned a genuine, non-recoverable
+    lock failure (no gas funds, RPC down, any revert other than a lock
+    race) into unconditional recursion -- the seed block is already mined,
+    so nothing about the situation changes between attempts, and it ran
+    until RecursionError instead of exiting cleanly. A persistent failure
+    must raise typer.Exit after exactly one lock attempt, not retry
+    forever."""
+    state = {"seed": ZERO_SEED, "seed_block": 100, "lock_calls": []}
+    contract = _make_contract(state)
+    w3 = _make_w3(150)
+    ctx, console = _make_ctx(w3)
+
+    # Every lock attempt fails the same way every time: build_and_send_tx
+    # catches the exception itself (exit_on_failure=False) and returns
+    # None, leaving the seed at zero and the seed block unmoved -- not a
+    # race (seed set by someone else) and not a re-anchor (seed block
+    # moved), so this is not recoverable by retrying.
+    mock_build_and_send_tx.return_value = None
+
+    with pytest.raises(typer.Exit):
+        _call(ctx, contract)
+
+    mock_build_and_send_tx.assert_called_once()
+    assert state["seed"] == ZERO_SEED
