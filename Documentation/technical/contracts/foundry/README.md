@@ -5,10 +5,10 @@ Per-file documentation for the Foundry workspace's supporting code — deploy/up
 | Doc | Source file | What it is |
 |-----|-------------|-----------|
 | **Scripts** | | |
-| [script/DeployPlatform.md](script/DeployPlatform.md) | `foundry/script/DeployPlatform.s.sol` | Deploys and wires the seven platform proxies; writes `deployments/<network>.json` |
-| [script/UpgradePlatform.md](script/UpgradePlatform.md) | `foundry/script/UpgradePlatform.s.sol` | Upgrades one platform proxy to its `<Name>V2` implementation |
-| [script/DeployFairLaunchDistributor.md](script/DeployFairLaunchDistributor.md) | `foundry/script/DeployFairLaunchDistributor.s.sol` | Deploys `DinFairLaunchDistributor` behind a proxy |
-| [script/DeploymentsPath.md](script/DeploymentsPath.md) | `foundry/script/DeploymentsPath.sol` | Shared chain-ID → `deployments/<network>.json` resolver |
+| [script/DeployPlatform.md](script/DeployPlatform.md) | [`foundry/script/DeployPlatform.s.sol`](../../../../foundry/script/DeployPlatform.s.sol) | Deploys and wires the seven platform proxies; writes `deployments/<network>.json` |
+| [script/UpgradePlatform.md](script/UpgradePlatform.md) | [`foundry/script/UpgradePlatform.s.sol`](../../../../foundry/script/UpgradePlatform.s.sol) | Upgrades one platform proxy to its `<Name>V2` implementation |
+| [script/DeployFairLaunchDistributor.md](script/DeployFairLaunchDistributor.md) | [`foundry/script/DeployFairLaunchDistributor.s.sol`](../../../../foundry/script/DeployFairLaunchDistributor.s.sol) | Deploys `DinFairLaunchDistributor` behind a proxy |
+| [script/DeploymentsPath.md](script/DeploymentsPath.md) | [`foundry/script/DeploymentsPath.sol`](../../../../foundry/script/DeploymentsPath.sol) | Shared chain-ID → `deployments/<network>.json` resolver |
 | **Upgrade fixtures** | | |
 | [upgrades/V2-fixtures.md](upgrades/V2-fixtures.md) | `foundry/src/upgrade/*V2.sol` | `DinTokenV2`, `DinCoordinatorV2`, `DinValidatorStakeV2`, `DINModelRegistryV2` |
 

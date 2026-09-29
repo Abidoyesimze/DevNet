@@ -46,10 +46,10 @@ Slot-by-slot inventories: [storage_layout.md](../../storage_layout.md).
 
 | Task | Tool | Doc |
 |------|------|-----|
-| Deploy + wire all seven proxies | `foundry/script/DeployPlatform.s.sol` | [DeployPlatform](../../contracts/foundry/script/DeployPlatform.md) |
+| Deploy + wire all seven proxies | [`foundry/script/DeployPlatform.s.sol`](../../../../foundry/script/DeployPlatform.s.sol) | [DeployPlatform](../../contracts/foundry/script/DeployPlatform.md) |
 | Import addresses into dincli | `dincli system import-deployments` (reads `foundry/deployments/<network>.json`) | [DeployPlatform — Usage](../../contracts/foundry/script/DeployPlatform.md#usage) |
-| Upgrade one proxy (to its `<Name>V2`) | `foundry/script/UpgradePlatform.s.sol` | [UpgradePlatform](../../contracts/foundry/script/UpgradePlatform.md) |
-| Per-network deployments file | `foundry/script/DeploymentsPath.sol` | [DeploymentsPath](../../contracts/foundry/script/DeploymentsPath.md) |
+| Upgrade one proxy (to its `<Name>V2`) | [`foundry/script/UpgradePlatform.s.sol`](../../../../foundry/script/UpgradePlatform.s.sol) | [UpgradePlatform](../../contracts/foundry/script/UpgradePlatform.md) |
+| Per-network deployments file | [`foundry/script/DeploymentsPath.sol`](../../../../foundry/script/DeploymentsPath.sol) | [DeploymentsPath](../../contracts/foundry/script/DeploymentsPath.md) |
 | V2 upgrade fixtures | `foundry/src/upgrade/*V2.sol` | [V2 fixtures](../../contracts/foundry/upgrades/V2-fixtures.md) |
 
 The contract-by-contract behavior (initializers, wiring, access control, ownership planes) is documented in each contract's page under [`contracts/`](../../contracts/): [DinToken](../../contracts/DinToken.md), [DinCoordinator](../../contracts/DinCoordinator.md), [DinValidatorStake](../../contracts/DinValidatorStake.md), [DINModelRegistry](../../contracts/DINModelRegistry.md).
@@ -58,9 +58,9 @@ The contract-by-contract behavior (initializers, wiring, access control, ownersh
 
 | Test | What it checks |
 |------|----------------|
-| `foundry/test/UpgradeValidation.t.sol` | `Upgrades.validateImplementation` on all seven platform implementations (initializer, storage and unsafe-pattern rules) |
-| `foundry/test/DeployPlatform.t.sol` — `ProxyWiringTest` | Every wiring edge from the deploy sequence; all ProxyAdmins owned by the deployer; faucet mint through the proxy |
-| `foundry/test/DeployPlatformScript.t.sol` — `DeployPlatformScriptTest` | Runs the script's own `deploy()` with default and overridden tokenomics; every contract and ProxyAdmin owned by the deployer; invalid overrides revert the deploy |
+| [`foundry/test/UpgradeValidation.t.sol`](../../../../foundry/test/UpgradeValidation.t.sol) | `Upgrades.validateImplementation` on all seven platform implementations (initializer, storage and unsafe-pattern rules) |
+| [`foundry/test/DeployPlatform.t.sol`](../../../../foundry/test/DeployPlatform.t.sol) — `ProxyWiringTest` | Every wiring edge from the deploy sequence; all ProxyAdmins owned by the deployer; faucet mint through the proxy |
+| [`foundry/test/DeployPlatformScript.t.sol`](../../../../foundry/test/DeployPlatformScript.t.sol) — `DeployPlatformScriptTest` | Runs the script's own `deploy()` with default and overridden tokenomics; every contract and ProxyAdmin owned by the deployer; invalid overrides revert the deploy |
 | `DeployPlatform.t.sol` — `ReInitializerProtectionTest` | A second `initialize` on each proxy, and a direct `initialize` on each implementation, both revert |
 | `DeployPlatform.t.sol` — `DinTokenUpgradeTest`, `DinCoordinatorUpgradeTest`, `DinValidatorStakeUpgradeTest`, `DINModelRegistryUpgradeTest` | Upgrade to the V2 fixture with `Upgrades.upgradeProxy` (validation included); state and access control survive |
 

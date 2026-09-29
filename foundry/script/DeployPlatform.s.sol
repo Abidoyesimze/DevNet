@@ -18,8 +18,8 @@ import {DeploymentsPath} from "./DeploymentsPath.sol";
 /// @notice Deploys the seven DIN platform contracts behind Transparent Proxies,
 ///         wires them together, and writes foundry/deployments/<network>.json
 ///         (see DeploymentsPath: localhost for anvil, sepolia_op_devnet for
-///         Optimism Sepolia) in the same schema as hardhat/deployments/, so
-///         dincli import-deployments accepts it without modification.
+///         Optimism Sepolia), which `dincli system import-deployments` reads
+///         as-is.
 ///
 /// Tokenomics parameters are read from the environment via vm.envOr, defaulting
 /// to today's in-code values so local deploys and existing tests are unchanged.

@@ -1,6 +1,6 @@
 # V2 Upgrade Fixtures
 
-> **Files:** `foundry/src/upgrade/DinTokenV2.sol`, `DinCoordinatorV2.sol`, `DinValidatorStakeV2.sol`, `DINModelRegistryV2.sol`
+> **Files:** [`foundry/src/upgrade/DinTokenV2.sol`](../../../../../foundry/src/upgrade/DinTokenV2.sol), [`DinCoordinatorV2.sol`](../../../../../foundry/src/upgrade/DinCoordinatorV2.sol), [`DinValidatorStakeV2.sol`](../../../../../foundry/src/upgrade/DinValidatorStakeV2.sol), [`DINModelRegistryV2.sol`](../../../../../foundry/src/upgrade/DINModelRegistryV2.sol)
 
 Four test fixtures, identical in shape, used to exercise the proxy upgrade path of the four original platform contracts:
 
@@ -20,7 +20,7 @@ contract DinTokenV2 is DinToken {
 
 ## Used by
 
-- `foundry/test/DeployPlatform.t.sol` — `DinTokenUpgradeTest`, `DinCoordinatorUpgradeTest`, `DinValidatorStakeUpgradeTest`, `DINModelRegistryUpgradeTest` upgrade a freshly deployed platform to these fixtures and check that state and access control survive.
+- [`foundry/test/DeployPlatform.t.sol`](../../../../../foundry/test/DeployPlatform.t.sol) — `DinTokenUpgradeTest`, `DinCoordinatorUpgradeTest`, `DinValidatorStakeUpgradeTest`, `DINModelRegistryUpgradeTest` upgrade a freshly deployed platform to these fixtures and check that state and access control survive.
 - [UpgradePlatform.s.sol](../script/UpgradePlatform.md) — always upgrades to `<Name>V2`.
 
 There are no fixtures for `DinTreasury`, `DinFeeRouter` or `DinEmission`.

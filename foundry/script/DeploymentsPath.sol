@@ -10,7 +10,8 @@ import {Script} from "forge-std/Script.sol";
 ///         "localhost") — so imports need no --file flag.
 ///
 ///         Chain id → network:
-///           1337, 31337  → localhost          (anvil / hardhat node)
+///           1337, 31337  → localhost          (foundry/anvil.sh uses 1337;
+///                                              31337 is anvil's / forge's default)
 ///           11155420     → sepolia_op_devnet  (Optimism Sepolia)
 ///         A non-empty DEPLOYMENTS_NETWORK env var overrides the mapping; any
 ///         other chain reverts unless it is set.

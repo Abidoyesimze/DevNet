@@ -1,6 +1,6 @@
 # UpgradePlatform.s.sol
 
-> **File:** `foundry/script/UpgradePlatform.s.sol`
+> **File:** [`foundry/script/UpgradePlatform.s.sol`](../../../../../foundry/script/UpgradePlatform.s.sol)
 > **Inherits:** [`DeploymentsPath`](DeploymentsPath.md) (→ `forge-std` `Script`)
 
 Upgrades a single platform proxy to its **`<Name>V2`** implementation.

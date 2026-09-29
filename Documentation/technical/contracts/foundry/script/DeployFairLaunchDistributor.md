@@ -1,9 +1,9 @@
 # DeployFairLaunchDistributor.s.sol
 
-> **File:** `foundry/script/DeployFairLaunchDistributor.s.sol`
+> **File:** [`foundry/script/DeployFairLaunchDistributor.s.sol`](../../../../../foundry/script/DeployFairLaunchDistributor.s.sol)
 > **Inherits:** [`DeploymentsPath`](DeploymentsPath.md) (→ `forge-std` `Script`)
 
-Deploys `DinFairLaunchDistributor` (`foundry/src/DinFairLaunchDistributor.sol`) behind a Transparent Proxy.
+Deploys `DinFairLaunchDistributor` ([`foundry/src/DinFairLaunchDistributor.sol`](../../../../../foundry/src/DinFairLaunchDistributor.sol)) behind a Transparent Proxy.
 
 ## Behavior
 

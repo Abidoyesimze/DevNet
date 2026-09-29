@@ -1,6 +1,6 @@
 # DeployPlatform.s.sol
 
-> **File:** `foundry/script/DeployPlatform.s.sol`
+> **File:** [`foundry/script/DeployPlatform.s.sol`](../../../../../foundry/script/DeployPlatform.s.sol)
 > **Inherits:** [`DeploymentsPath`](DeploymentsPath.md) (→ `forge-std` `Script`)
 
 The canonical platform deployment. It deploys the seven platform contracts behind OpenZeppelin Transparent Proxies (via `Upgrades.deployTransparentProxy`, which runs the OZ upgrade-safety validation), wires them together, and writes their addresses to `foundry/deployments/<network>.json` for `dincli system import-deployments`.
@@ -96,7 +96,7 @@ This writes `foundry/deployments/sepolia_op_devnet.json` and `foundry/broadcast/
 
 ## Tested by
 
-`foundry/test/DeployPlatform.t.sol` reproduces this sequence in its `PlatformTest._deployPlatform()` fixture and checks every wiring edge (`ProxyWiringTest`), initializer protection (`ReInitializerProtectionTest`), and V2 upgrades (`*UpgradeTest`). `foundry/test/DeployPlatformScript.t.sol` (`DeployPlatformScriptTest`) runs the script's own `deploy()`: defaults, all 11 overrides and a single S5 override land on chain, invalid overrides revert the deploy, every contract and ProxyAdmin is owned by the deployer, and `readTokenomics()` returns the defaults and then the values set with `vm.setEnv`. The `tests/dincli/` integration harness runs this script against a local chain (`PLATFORM_DEPLOY_TOOLCHAIN=foundry`).
+[`foundry/test/DeployPlatform.t.sol`](../../../../../foundry/test/DeployPlatform.t.sol) reproduces this sequence in its `PlatformTest._deployPlatform()` fixture and checks every wiring edge (`ProxyWiringTest`), initializer protection (`ReInitializerProtectionTest`), and V2 upgrades (`*UpgradeTest`). [`foundry/test/DeployPlatformScript.t.sol`](../../../../../foundry/test/DeployPlatformScript.t.sol) (`DeployPlatformScriptTest`) runs the script's own `deploy()`: defaults, all 11 overrides and a single S5 override land on chain, invalid overrides revert the deploy, every contract and ProxyAdmin is owned by the deployer, and `readTokenomics()` returns the defaults and then the values set with `vm.setEnv`. The `tests/dincli/` integration harness runs this script against a local chain (`PLATFORM_DEPLOY_TOOLCHAIN=foundry`).
 
 ## Notes
 
