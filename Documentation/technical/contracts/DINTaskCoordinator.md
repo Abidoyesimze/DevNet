@@ -207,22 +207,22 @@ Permissionless (no `onlyCurrentGI` modifier — note: `isDINAggregator[_GI]` che
 function autoCreateTier1AndTier2(uint _GI) external onlyOwner onlyCurrentGI(_GI)
 ```
 
-Called after LM evaluation closes (`LMSevaluationClosed`).
+Called after LM evaluation closes (`LMSevaluationClosed`). Reverts with `TC_AggSeedNotLocked` unless `aggSeed[_GI]` is already locked via `lockAggSeed` (issue #156 H-2, task_240926_18 Part B — see the seed-lock subsection below).
 
 **Algorithm:**
 
 1. **Load aggregator pool:** filter the historical registration list `dinAggregators[_GI]` down to aggregators still `isValidatorActive` at call time (`_activeAggregatorPool`). Revert `TC_NotEnoughValidators` if the active count is below `T1_AGGREGATORS_PER_BATCH`.
 
-2. **Shuffle aggregators (Fisher-Yates, storage):**
+2. **Shuffle aggregators (Fisher-Yates, storage, `pure`):**
    ```
-   j = keccak256(blockhash(block.number - 1), i, arr.length) % (i+1)
+   j = keccak256(keccak256(aggSeed[_GI], "AGG_ADDR"), i, arr.length) % (i+1)
    ```
 
 3. **Collect approved model indexes:** Calls `dinTaskAuditorContract.approvedModelIndexes(_GI)`. Revert `TC_NotEnoughApprovedModels` if fewer than `T1_MODELS_PER_BATCH`.
 
-4. **Shuffle model indexes (Fisher-Yates, memory):**
+4. **Shuffle model indexes (Fisher-Yates, memory, `pure`):**
    ```
-   j = keccak256(block.timestamp, i, arr.length, msg.sender) % (i+1)
+   j = keccak256(keccak256(aggSeed[_GI], "AGG_IDX"), i, arr.length) % (i+1)
    ```
 
 5. **Greedy T1 batch creation:**
@@ -353,14 +353,27 @@ After `endGI`, a new GI can be started via `startGI(_GI+1, newPassScore)` or `st
 
 ## 11. Shuffling (PRNG Details)
 
-Two internal shuffle helpers mirror those in `DINTaskAuditor`, and are applied to the *active-filtered* aggregator pool (`_activeAggregatorPool`), not the raw historical registration list:
+Two internal shuffle helpers (`pure`, taking an explicit `bytes32 seed`) mirror those in `DINTaskAuditor`, and are applied to the *active-filtered* aggregator pool (`_activeAggregatorPool`), not the raw historical registration list:
 
 | Function | Target | Entropy |
 |----------|--------|---------|
-| `_shuffleAddressArray` (storage) | Active aggregator pool | `blockhash(block.number - 1)` |
-| `_shuffleUintArray` (memory) | Model index pool | `block.timestamp + msg.sender` |
+| `_shuffleAddressArray` (storage) | Active aggregator pool | `keccak256(seed, "AGG_ADDR")` (`autoCreateTier1AndTier2`) or the dispute seed's own domain tag (`_assignFreshSubgroup`) |
+| `_shuffleUintArray` (memory) | Model index pool | `keccak256(seed, "AGG_IDX")` |
 
-Both use Fisher-Yates algorithm. See `DINTaskAuditor` documentation and Security Considerations for PRNG weakness notes.
+Both use Fisher-Yates algorithm. `aggSeed[_GI]` / `auditSeed[_GI]` (§11.1) replaced `blockhash(block.number - 1)` / `block.timestamp + msg.sender` as of issue #156 H-2 (task_240926_18 Part B) — see Security Considerations below for what the fix does and doesn't close.
+
+### 11.1 Batch-Assignment Seed Lock
+
+`autoCreateTier1AndTier2` and `createAuditorsBatches` (delegated to `DINTaskAuditor`, passing the locked seed across the interface) each require their own ungrindable seed to already be locked, using the same future-block-seed + permissionless-lock pattern as the dispute seed (`Dispute.seed`/`Dispute.seedBlock`, `lockDisputeSeed`):
+
+- **Anchor:** `closeLMsubmissionsEvaluation` sets `aggSeedBlock[_GI] = block.number + disputeSeedDelay` (T1/T2); `closeLMsubmissions` sets `auditSeedBlock[_GI]` the same way (auditor batches). `disputeSeedDelay` is reused rather than adding a second delay parameter — same owner-controlled-transition trust assumption as the dispute seed.
+- **Lock:** `lockAggSeed(uint _GI)` / `lockAuditSeed(uint _GI)`, callable by **anyone**, once `block.number > seedBlock`. Stores `seed = keccak256(blockhash(seedBlock), _GI, "AGG"/"AUD")` and emits `AggSeedLocked`/`AuditSeedLocked`. If `blockhash(seedBlock) == 0` (more than 256 blocks passed), re-anchors instead (`seedBlock = block.number + disputeSeedDelay`, `AggSeedReanchored`/`AuditSeedReanchored`) rather than storing a zero-derived seed.
+- **Gate:** `autoCreateTier1AndTier2` reverts `TC_AggSeedNotLocked` and `createAuditorsBatches` reverts `TC_AuditSeedNotLocked` unless `aggSeed[_GI]`/`auditSeed[_GI]` is already non-zero. `DINTaskAuditor.createAuditorsBatches(uint, bytes32)` independently rejects a zero seed too (`TA_AuditSeedNotLocked`), defense-in-depth on top of the coordinator's own check.
+
+**Residual trust and gaps** (raised in the PR #191 review, not fixed by this mechanism):
+- **Sequencer trust:** `blockhash` is sequencer-produced on OP Stack, so this design trusts the sequencer not to grind — same caveat as the dispute seed. VRF is the mainnet-grade follow-up (issue #178).
+- **Re-roll by declining to lock:** once `seedBlock` is mined, its hash (and therefore the resulting shuffle) is computable off-chain by anyone watching. The model owner can simply not call `lock…Seed` if they dislike the preview, wait out the 256-block window, and get a fresh anchor on the next lock call — repeatable. The permissionless lock only protects against this if another party locks first.
+- **Post-lock pool reshaping:** `_activeAggregatorPool`/`_activeAuditorPool` are evaluated at `autoCreateTier1AndTier2`/`createAuditorsBatches` call time, *after* the seed is already public. A validator can unstake between the lock and the create call to remove themselves from the pool, which re-shuffles everyone else's assignment (Fisher-Yates re-rolls on any pool-size change) — an attacker with several registered addresses can compute all subset outcomes off-chain and unstake whichever produces the batch they want.
 
 ---
 
@@ -372,6 +385,10 @@ Both use Fisher-Yates algorithm. See `DINTaskAuditor` documentation and Security
 | `Tier1BatchAuto(GI, batchId)` | T1 batch created |
 | `Tier2BatchAuto(GI, batchId)` | T2 batch created |
 | `AggregatorSlashed(GI, batchId, aggregator, reason, requested, actual)` | Aggregator slashed in `slashAggregators` (T1 or T2) |
+| `AggSeedLocked(GI, seed)` | `lockAggSeed` locks the T1/T2 batch-assignment seed |
+| `AggSeedReanchored(GI, newSeedBlock)` | `lockAggSeed` re-anchors after the 256-block `blockhash` window is missed |
+| `AuditSeedLocked(GI, seed)` | `lockAuditSeed` locks the auditor-batch seed |
+| `AuditSeedReanchored(GI, newSeedBlock)` | `lockAuditSeed` re-anchors after the 256-block `blockhash` window is missed |
 
 ---
 
@@ -381,7 +398,7 @@ Both use Fisher-Yates algorithm. See `DINTaskAuditor` documentation and Security
 |------|---------------------|
 | Unauthorized state transitions | All owner functions guarded by `onlyOwner` |
 | Wrong GI operations | `onlyCurrentGI` modifier on most functions |
-| Weak PRNG for batch assignment | Known issue; use VRF in production |
+| Weak PRNG for batch assignment | **Fixed** (issue #156 H-2, task_240926_18 Part B): `blockhash(block.number - 1)`/`block.timestamp` replaced by the locked, future-block `aggSeed`/`auditSeed` (§11.1). Residual: sequencer trust, a re-roll available to a model owner who declines to lock, and post-lock pool reshaping via unstaking — see §11.1's residual list. VRF remains the mainnet-grade follow-up (issue #178) |
 | Auditor slashing | Implemented on `DINTaskAuditor` (S1 always active, S3 shadow-mode by default) and triggered here via delegation — see `DINTaskAuditor.md` §10 |
 | Aggregator collusion (submit same wrong CID) | Plurality voting means 2-of-3 colluding aggregators win; no quorum threshold — design risk |
 | No slash appeal mechanism | Slashed aggregators cannot challenge the decision on-chain |

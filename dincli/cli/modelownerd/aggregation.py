@@ -2,8 +2,8 @@ from pathlib import Path
 import typer
 from rich.table import Table
 
-from dincli.cli.utils import (CACHE_DIR, build_and_send_tx, get_manifest_key,
-                               require_custom_manifest_service)
+from dincli.cli.utils import (CACHE_DIR, build_and_send_tx, ensure_batch_seed_locked,
+                               get_manifest_key, require_custom_manifest_service)
 from dincli.services.cid_utils import get_cid_from_bytes32
 
 aggregation_app = typer.Typer(help="Aggregation commands")
@@ -27,7 +27,16 @@ def create_tier1_tier2_batches(
 
     ref_gi = ctx.obj.validate_gi_ET_curr_GI(gi, curr_GI)
     ctx.obj.validate_GIstate_ET_given_GIstate(GIstate, "LMSevaluationClosed","Can not create Tier 1 & Tier 2 batches at this time.")
-    
+
+    # issue #156 H-2: autoCreateTier1AndTier2 now requires an ungrindable,
+    # future-block-anchored seed to already be locked. Lock it here (or
+    # skip if someone else already has) before attempting the real call.
+    ensure_batch_seed_locked(
+        ctx, task_coordinator_Contract, ref_gi,
+        seed_getter="aggSeed", seed_block_getter="aggSeedBlock",
+        lock_fn="lockAggSeed", label="T1/T2 batch",
+    )
+
     console.print(f"[bold green]Creating Tier 1 & Tier 2 batches[/bold green]")
     
     try:

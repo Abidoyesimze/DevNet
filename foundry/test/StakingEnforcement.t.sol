@@ -354,6 +354,8 @@ contract StakingEnforcementTest is Test {
 
         vm.startPrank(modelOwner);
         tc.closeLMsubmissions(1);
+        vm.roll(block.number + tc.disputeSeedDelay() + 1); // issue #156 H-2: seed lock
+        tc.lockAuditSeed(1);
         tc.createAuditorsBatches(1);
         tc.setTestDataAssignedFlag(1, true);
         tc.startLMsubmissionsEvaluation(1);
@@ -381,6 +383,8 @@ contract StakingEnforcementTest is Test {
 
         vm.startPrank(modelOwner);
         tc.closeLMsubmissionsEvaluation(1);
+        vm.roll(block.number + tc.disputeSeedDelay() + 1); // issue #156 H-2: seed lock
+        tc.lockAggSeed(1);
         tc.autoCreateTier1AndTier2(1);
         tc.startT1Aggregation(1);
         vm.stopPrank();

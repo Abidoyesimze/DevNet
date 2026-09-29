@@ -161,6 +161,21 @@ contract DisputeResolutionTest is Test {
     ///      the same CID, and returns with GIstate == T1AggregationDone.
     ///      Registering more than 3 aggregators leaves an excludable pool for
     ///      the fresh-subgroup tests.
+
+    /// @dev issue #156 H-2: rolls past disputeSeedDelay and locks the
+    ///      auditor-batch seed for `gi`. Small helper (not inlined at each
+    ///      call site) to keep the fixture functions below reasonably sized.
+    function _lockAuditSeedNow(uint gi) internal {
+        vm.roll(block.number + tc.disputeSeedDelay() + 1);
+        tc.lockAuditSeed(gi);
+    }
+
+    /// @dev Same as _lockAuditSeedNow, for the T1/T2 aggregation seed.
+    function _lockAggSeedNow(uint gi) internal {
+        vm.roll(block.number + tc.disputeSeedDelay() + 1);
+        tc.lockAggSeed(gi);
+    }
+
     function _runToT1Finalized(uint256 numAggregators) internal {
         _deployPlatform();
         _deployTaskPair();
@@ -208,6 +223,7 @@ contract DisputeResolutionTest is Test {
 
         vm.startPrank(modelOwner);
         tc.closeLMsubmissions(1);
+        _lockAuditSeedNow(1); // issue #156 H-2
         tc.createAuditorsBatches(1);
         tc.setTestDataAssignedFlag(1, true);
         tc.startLMsubmissionsEvaluation(1);
@@ -237,6 +253,7 @@ contract DisputeResolutionTest is Test {
 
         vm.startPrank(modelOwner);
         tc.closeLMsubmissionsEvaluation(1);
+        _lockAggSeedNow(1); // issue #156 H-2
         tc.autoCreateTier1AndTier2(1);
         tc.startT1Aggregation(1);
         vm.stopPrank();
@@ -307,6 +324,7 @@ contract DisputeResolutionTest is Test {
 
         vm.startPrank(modelOwner);
         tc.closeLMsubmissions(1);
+        _lockAuditSeedNow(1); // issue #156 H-2
         tc.createAuditorsBatches(1);
         tc.setTestDataAssignedFlag(1, true);
         tc.startLMsubmissionsEvaluation(1);
@@ -336,6 +354,7 @@ contract DisputeResolutionTest is Test {
 
         vm.startPrank(modelOwner);
         tc.closeLMsubmissionsEvaluation(1);
+        _lockAggSeedNow(1); // issue #156 H-2
         tc.autoCreateTier1AndTier2(1);
         tc.startT1Aggregation(1);
         vm.stopPrank();

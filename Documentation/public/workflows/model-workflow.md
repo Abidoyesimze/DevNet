@@ -327,6 +327,18 @@ The Model Owner prepares evaluation batches and test data, then auditors evaluat
 
 **Model Owner** prepares evaluation batches and starts evaluation:
 
+> [!NOTE]
+> `auditor-batches create` now waits for and locks an ungrindable,
+> future-block-anchored seed before it creates the batches (issue #156 —
+> prevents the model owner from timing this call to steer which auditors
+> land in which batch). This adds a short automatic pause (a handful of
+> blocks, ~seconds on Optimism Sepolia) before the command proceeds — no
+> extra action needed, and if another process already locked the seed
+> first, the wait is skipped entirely. On the `local` network this
+> requires an anvil instance producing blocks on its own (`foundry/anvil.sh`
+> passes `--block-time`) — an idle anvil started without block production
+> never mines the anchor block, and the wait never ends.
+
 ```bash
 # create evaluation batches
 dincli model-owner auditor-batches create <model_id>
@@ -370,6 +382,12 @@ dincli model-owner lms-evaluation close <model_id>
 Eligible local models are aggregated hierarchically. Tier 1 (T1) aggregation combines sub-batches, and Tier 2 (T2) aggregation combines the results of T1 into the new global model.
 
 **Model Owner** generates T1 & T2 batches and starts T1 aggregation:
+
+> [!NOTE]
+> Same as `auditor-batches create` above, `aggregation create-t1nt2-batches`
+> waits for and locks its own ungrindable, future-block-anchored seed
+> (issue #156) before creating T1/T2 batches. Automatic short pause, no
+> extra action needed — same `local`-network block-production caveat.
 
 ```bash
 # create t1 and t2 batches

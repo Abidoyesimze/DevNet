@@ -173,6 +173,8 @@ contract EncryptedTestDataTest is Test {
 
         vm.startPrank(modelOwner);
         tc.closeLMsubmissions(1);
+        vm.roll(block.number + tc.disputeSeedDelay() + 1); // issue #156 H-2: seed lock
+        tc.lockAuditSeed(1);
         tc.createAuditorsBatches(1);
         vm.stopPrank();
 
