@@ -30,8 +30,11 @@ class DummyContextObj:
     def __init__(self):
         self.console = DummyConsole()
         self.coordinator_loads = 0
+        self.account_loads = 0
 
     def get_en_w3_account_console(self):
+        # Loads (and may decrypt) the wallet in the real DinContext.
+        self.account_loads += 1
         return "local", None, SimpleNamespace(address=SLASHER), self.console
 
     def get_deployed_din_coordinator_contract(self):
@@ -59,6 +62,7 @@ def test_add_slasher_without_target_exits_before_loading_coordinator(sent):
     assert exc.value.exit_code == 1
     assert sent == []
     assert ctx.obj.coordinator_loads == 0
+    assert ctx.obj.account_loads == 0  # usage error before any wallet unlock
     assert "No slasher contract given" in ctx.obj.console.text()
 
 
@@ -70,6 +74,7 @@ def test_add_slasher_with_explicit_contract_sends_add_slasher_contract(sent):
     assert len(sent) == 1
     assert sent[0][1] == ("addSlasherContract", SLASHER)
     assert ctx.obj.coordinator_loads == 1
+    assert ctx.obj.account_loads == 1
 
 
 def test_dinrep_has_no_deploy_sub_app():

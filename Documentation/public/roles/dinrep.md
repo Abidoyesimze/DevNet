@@ -74,7 +74,9 @@ Optimism Sepolia is a public chain, so there is no anvil step. Instead you need 
 
   The deploying address becomes the owner of every platform contract and every ProxyAdmin, so use the DIN-Representative key.
 
-- **Funds.** The address needs Optimism Sepolia ETH. A full deploy is roughly 30 transactions: seven implementations, seven proxies, and the wiring calls.
+- **Funds.** The address needs Optimism Sepolia ETH. A full deploy is 22 transactions: seven implementations, seven proxies, and eight wiring calls. Each proxy creates its own ProxyAdmin inside its constructor, so the ProxyAdmins need no transactions of their own.
+
+- **Tokenomics parameters.** `DeployPlatform.s.sol` reads 11 tokenomics settings from the environment: `DIN_PER_ETH`, `MINT_CAP`, the four `EMISSION_*` keys, `MIN_STAKE`, the three `S5_*` keys and `S6_NO_PARTICIPATION_THRESHOLD`. Any key that isn't set falls back to the in-code default; for example, `MINT_CAP` defaults to `0`, which means uncapped. Set the values chosen for this network in `.env.sepolia_op_devnet` (loaded above) or in `foundry/.env` (forge loads it automatically). The script logs an `[INFO] <KEY> not set` line for each missing key and ends with a `--- Effective tokenomics ---` block. See [DeployPlatform.md](../../technical/contracts/foundry/script/DeployPlatform.md) for every key and its default.
 
 **2. Deploy:**
 
@@ -91,12 +93,12 @@ cd ..
 
 To also verify the contracts on the block explorer, add `--verify --etherscan-api-key "$ETHERSCAN_API_KEY"`.
 
-Alternatively, `--rpc-url optimism-sepolia` uses the `foundry.toml` RPC alias. That alias builds an Infura URL from `INFURA_API_KEY`, which forge loads automatically from `foundry/.env` (gitignored), so it works without sourcing `.env.sepolia_op_devnet`.
+Alternatively, `--rpc-url optimism-sepolia` uses the `foundry.toml` RPC alias. That alias builds an Infura URL from `INFURA_API_KEY`, which forge loads automatically from `foundry/.env` (gitignored), so it works without sourcing `.env.sepolia_op_devnet`. In that case, put any tokenomics overrides in `foundry/.env` too.
 
-This writes `foundry/deployments/sepolia_op_devnet.json`. Unlike `localhost.json`, this file is **committed**: it is the network's public record of the platform addresses.
+This writes `foundry/deployments/sepolia_op_devnet.json`. Unlike `localhost.json`, this file is not gitignored: commit it, because it is the network's public record of the platform addresses.
 
 > [!TIP]
-> Run once without `--broadcast` first. Forge then only simulates the deploy against the live chain state, so you can check the sender, the balance, and the upgrade-safety validation without spending gas.
+> Run once without `--broadcast` first. Forge then only simulates the deploy against the live chain state, so you can check the sender, the balance, the upgrade-safety validation, and the `--- Effective tokenomics ---` values without spending gas.
 
 **3. Import into dincli:**
 

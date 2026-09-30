@@ -71,7 +71,16 @@ def add_slasher(
     ),
 
 ):
-    
+
+    # Check the target before get_en_w3_account_console(), which unlocks the
+    # wallet: a usage error shouldn't cost a password prompt first.
+    if not (contract or task_coordinator_flag or task_auditor_flag):
+        ctx.obj.console.print(
+            "[bold red]✗ No slasher contract given.[/bold red] "
+            "Pass --contract <address>, --taskCoordinator, or --taskAuditor."
+        )
+        raise typer.Exit(1)
+
     effective_network, w3, account, console = ctx.obj.get_en_w3_account_console()
 
     if contract:
@@ -97,12 +106,6 @@ def add_slasher(
             f"[bold green] ✓ Using DINTaskAuditor Address: {contract_address} "
             f"(from {os.getcwd()}/.env)[/bold green]"
         )
-    else:
-        console.print(
-            "[bold red]✗ No slasher contract given.[/bold red] "
-            "Pass --contract <address>, --taskCoordinator, or --taskAuditor."
-        )
-        raise typer.Exit(1)
 
     DINCoordinator_Contract = ctx.obj.get_deployed_din_coordinator_contract()
 

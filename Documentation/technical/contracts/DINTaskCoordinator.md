@@ -278,6 +278,7 @@ Earlier findings from the [foundry/src security review](../audits/foundry-src-se
 - **No. 8 — Leftovers:** `networkFeeFloor` is stored but not enforced. `setTestDataAssignedFlag` gates nothing: evaluation can start without test data being assigned. `releaseGIRegistrationSlots` uses string `require` messages, unlike the rest of the contract.
 - **No. 9 — Not upgradeable:** a bug in a model's task contracts requires redeploying them and re-registering the model.
 - **No. 10 — dincli lags this contract:** `dincli model-owner deploy task-coordinator` still calls the older one-argument constructor (no `modelId`). `dincli aggregator aggregate-t2` names its working directory, worker job and container after the last T1 batch id, not the T2 batch id (issue #202, Part 2); the on-chain commit is unaffected.
+- **No. 11 — `registerDINaggregator` doesn't check the GI.** Unlike `DINTaskAuditor.registerDINAuditor`, it has no `onlyCurrentGI`: while any GI's registration window is open, a validator can register for a future GI (§6.2). Up to 300 addresses can fill GI N+1's list during GI N's window, which locks out honest registrants and hands the attacker every T1/T2 batch. Registering for an already-released past GI leaks the caller's own concurrent-registration slot. dincli always passes the current GI. Tracked in issue #206; the fix (add `onlyCurrentGI`) has to fit within the EIP-170 budget from No. 1.
 
 ---
 

@@ -5,7 +5,7 @@
 **Decides:** How `dincli` deploys the four upgradeable platform contracts (`DinToken`, `DinCoordinator`, `DinValidatorStake`, `DINModelRegistry`), and why the Hardhat-vs-Foundry question is almost entirely irrelevant to that decision.
 **Related:** [`hardhat/README.md`](./hardhat/README.md) (contract design), [`storage_layout.md`](../storage_layout.md), `Developer/discussion/migrate_to_foundy.md`
 
-> **Status update (2026-09-25).** The decision below still stands, but some of the context around it has changed:
+> **Status update (2026-09-30).** The decision below still stands, but some of the context around it has changed:
 > - Foundry (`foundry/src/`) is now the reference implementation. It has **seven** platform proxies (plus `DinTreasury`, `DinFeeRouter`, `DinEmission`) and its own `DeployPlatform.s.sol` / `UpgradePlatform.s.sol` — see [`foundry/README.md`](./foundry/README.md).
 > - `hardhat/` was kept as a secondary toolchain rather than deleted. The two contract trees are **no longer byte-identical**: Hardhat lags Foundry.
 > - The interim flow is `forge script DeployPlatform.s.sol` followed by `dincli system import-deployments` (Foundry by default). dincli's old constructor-based `dinrep deploy` commands have been removed; native proxy deployment is still the target ([dincli-native-proxy-deployment.md](../../../Developer/issues/dincli-native-proxy-deployment.md)).

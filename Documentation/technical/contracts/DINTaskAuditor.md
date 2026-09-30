@@ -66,7 +66,7 @@ Constants: `MAX_REGISTERED_AUDITORS = 300`; `MAX_LM_SUBMISSIONS = 10000` (a plai
 | Variable | Default | Setter |
 |----------|---------|--------|
 | `rewardSplit` | clients 60% / auditors 20% / aggregators 15% / treasury 5% | `setRewardSplit` (must sum to 10 000 bps) |
-| `s1SlashFractionBps` | 3000 (30%) | `setS1SlashFractionBps` (≤ 10 000) |
+| `s1SlashFractionBps` | 3000 (30%) | `setS1SlashFractionBps` (1 – 10 000) |
 | `s3DeviationThreshold` | 40 (on the 0–100 scale) | `setS3DeviationThreshold` (≤ 100) |
 | `s3SlashingEnabled` | `false` (shadow mode) | `setS3SlashingEnabled` |
 | `disputeBondAmount` | 0 | `setDisputeBondAmount` |
@@ -195,7 +195,7 @@ Registration & data: `DINAuditorRegistered`, `LocalModelSubmitted`, `AuditorsBat
 
 Read alongside the [foundry/src security review](../audits/foundry-src-security-review.md).
 
-- **No. 1 — Test-data disputes can be won by the challenger alone.** `resolveTestDataDispute` is callable by anyone, and any commitment *mismatch* upholds the dispute. A challenger can call it with an arbitrary `K` and win: bond back, the model owner's GI pool cut by `disputePenaltyBps`, and the batch blocked until reassignment. Only the model owner revealing the real `K` should be able to reach the "match" branch, and a mismatch from a non-owner caller should not count as evidence.
+- **No. 1 — Test-data disputes can be won by the challenger alone.** `resolveTestDataDispute` is callable by anyone, and any commitment *mismatch* upholds the dispute. A challenger can call it with an arbitrary `K` and win: bond back, the model owner's GI pool cut by `disputePenaltyBps`, and the batch blocked until reassignment. Only the model owner revealing the real `K` should be able to reach the "match" branch, and a mismatch from a non-owner caller should not count as evidence. `disputeBondAmount` defaults to 0, so this costs the challenger nothing and can be repeated after every reassignment. Tracked in issue No. 205.
 - **No. 2 — Commit hashes are not bound to the auditor.** `keccak256(score, vote, salt)` carries no address, GI, batch or model. An auditor in the same batch can copy another's commit hash, wait for their reveal, and replay it. Tracked in issue No. 192. (The aggregation commits on the coordinator do bind `msg.sender`.)
 - **No. 3 — Committed-but-unrevealed is slashed as a liveness miss.** An auditor who commits and then withholds the reveal pays the S1 fraction (`AUD_NO_VOTE`, 30% of `minStake` by default). That is less than the full-`minStake` S3 slash a revealed outlier would pay once `s3SlashingEnabled` is on, so an auditor who sees they will be in the minority can choose not to reveal. Whether this case gets its own reason code and fraction is open in issue No. 201 (Part B).
 - **No. 4 — Unclaimable remainders.** If no model is approved (`giTotalApprovedScore == 0`), or nobody reveals, or no aggregator weight exists, that role's pool share stays in the contract with no reclaim path.

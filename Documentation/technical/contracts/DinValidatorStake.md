@@ -109,7 +109,7 @@ Run after every stake/unstake/claim/slash/unblacklist/reactivate:
 5. else `activeStake > 0` → `Exiting`.
 6. else → `None`.
 
-Once a jail has expired, *any* call that syncs status (e.g. `stake`) recomputes the status from rules 3–6, so `reactivate()` is not the only way out of `Jailed` (see §13 No. 3).
+Once a jail has expired, *any* call that syncs status (e.g. `stake`) recomputes the status from rules 3–6, so `reactivate()` is not the only way out of `Jailed` (see §14 No. 3).
 
 ---
 
@@ -167,7 +167,7 @@ The ring is namespaced by the **calling task contract** because `giIndex` is a p
 
 Increments `s6NoParticipationCount[validator]` and emits `S6NoParticipationRecorded`. Below `s6NoParticipationThreshold` it returns `0`. At or above it, it slashes `MIN_STAKE × (count − threshold + 1) / 10`, capped at `MIN_STAKE` (10% more per breach), and emits `S6PartialSlashFired`. The count never resets.
 
-> No contract in `foundry/src` currently calls `recordNoParticipation` — the task contracts deliberately skip it where `slashPartial` already applies ("No S6 recordNoParticipation here…"), so S6 is implemented but not wired (§13 No. 1).
+> No contract in `foundry/src` currently calls `recordNoParticipation` — the task contracts deliberately skip it where `slashPartial` already applies ("No S6 recordNoParticipation here…"), so S6 is implemented but not wired (§14 No. 1).
 
 ### 7.5 Jailing — `jailValidator(validator, duration, reason)`
 
@@ -209,7 +209,69 @@ Plus the public getters for all state in §3.
 
 ---
 
-## 11. Events & Errors
+## 11. Workflows & Scenarios
+
+Worked examples with the defaults from §3.2 (`MIN_STAKE` = 10 DIN, `UNBONDING_PERIOD` = 7 days, S1/S2 fraction 30%, S5 window 5 / threshold 3 / jail 7 days). Every slashed amount is split as in §7.1: half burned, half to `slashTreasury` (or also burned if it is unset).
+
+### 11.1 Onboarding
+
+1. The validator obtains DIN (e.g. `DinCoordinator.depositAndMint()`) and approves `DinValidatorStake` to spend it.
+2. `stake(amount)`: `amount` must be at least `MIN_STAKE` **per call**. The contract pulls the DIN and adds it to `activeStake`.
+3. With `activeStake ≥ MIN_STAKE` and nothing pending, the status becomes `Active`.
+4. The task contracts check `isValidatorActive()` (plus any per-model floor and concurrency cap, §8) before accepting a registration.
+
+### 11.2 Exit
+
+1. `unstake(amount)` moves `amount` from `activeStake` to `pendingWithdrawals` and sets `withdrawAvailableAt = now + UNBONDING_PERIOD`. Only one withdrawal can be pending at a time.
+2. The status becomes `Exiting`, so the validator gets no new work. The pending amount **stays slashable**.
+3. After `withdrawAvailableAt`, `claimUnstaked()` pays out whatever is still pending.
+4. The status is then recomputed: `Active`, `Exiting` or `None`, depending on the remaining `activeStake`.
+
+### Scenario 1: Normal entry
+
+Stake `20 DIN` → `activeStake = 20`, `pendingWithdrawals = 0`, status `Active`. The validator is eligible for new work.
+
+### Scenario 2: Partial exit with stake left over
+
+Start with `30 DIN`, then `unstake(10)` → `activeStake = 20`, `pendingWithdrawals = 10`, status `Exiting`. The validator is **not** active even though `activeStake ≥ MIN_STAKE`, because an exit is in progress. After `claimUnstaked()` the pending 10 DIN is paid out and the status returns to `Active`.
+
+### Scenario 3: Full exit
+
+Start with `20 DIN`, then `unstake(20)` → `activeStake = 0`, `pendingWithdrawals = 20`, status `Exiting`. After `UNBONDING_PERIOD`, `claimUnstaked()` pays out 20 DIN and the status becomes `None`.
+
+### Scenario 4: Slashed during unbonding
+
+Start with `20 DIN`, then `unstake(10)` → `activeStake = 10`, `pendingWithdrawals = 10`. A slasher then calls `slash(v, 15 DIN, reason)`:
+- 10 DIN comes from `activeStake`, then 5 DIN from `pendingWithdrawals`;
+- 7.5 DIN is burned and 7.5 DIN goes to `slashTreasury`;
+- final state: `activeStake = 0`, `pendingWithdrawals = 5`, status `Exiting`.
+
+Exiting first does not escape the penalty. If the slash had exceeded the 20 DIN slashable balance, it would have been capped at 20 rather than reverting.
+
+### Scenario 5: Claim after a partial slash
+
+Continuing Scenario 4: once `withdrawAvailableAt` passes, `claimUnstaked()` pays out only the remaining **5 DIN**, not the 10 DIN originally requested.
+
+### Scenario 6: Blacklisted validator
+
+After the owner calls `blacklistValidator(v)`, `stake`, `unstake` and `claimUnstaked` all revert with `ValidatorIsBlacklisted`, so the funds are frozen. The validator **can still be slashed**. An S5 escalation against them reverts the whole slash, though (§14 No. 2). The only way out is `unblacklistValidator(v)`, which restores `Jailed` if a jail is still running and otherwise recomputes the status.
+
+### Scenario 7: Slashed below the minimum
+
+Start with `12 DIN`; a 3 DIN slash leaves `activeStake = 9`, so the status becomes `Exiting` (below `MIN_STAKE`) and the validator gets no new work. The minimum applies per call, so `stake(1)` reverts with `AmountLessThanMinStake`. Getting back to `Active` takes `stake(10)` or more.
+
+### Scenario 8: S5 escalation and jail
+
+A validator with `20 DIN` misses a reveal on the same model in three consecutive GIs (1, 2, 3). Each miss arrives as `slashPartial` from that model's task contract:
+- **GIs 1 and 2:** each slashes `10 × 30% = 3 DIN` (1.5 burned, 1.5 to the treasury), leaving `activeStake = 14`. That contract's ring for the validator is now `[1, 2]`.
+- **GI 3:** the ring becomes `[1, 2, 3]`, reaching the threshold of 3 within the window of 5, so the call **escalates**. It slashes a full `MIN_STAKE` (10 DIN, reason `S5_RECIDIVISM`) instead of 3 DIN, jails the validator for 7 days, emits `ValidatorEscalatedS5` and clears the ring. The result is `activeStake = 4`, status `Jailed`.
+- **After the jail:** `reactivate()` reverts with `StakeBelowFloor` (4 < 10). The validator has to `stake(10)` first. Once the jail has expired, that `stake` call already recomputes the status to `Active`, so `reactivate()` is never needed (§14 No. 3).
+
+The ring is kept per calling task contract, so the same three misses spread across three different models would not escalate (§14 No. 5).
+
+---
+
+## 12. Events & Errors
 
 **Events:** `ValidatorStaked`, `ValidatorUnstakeRequested`, `ValidatorWithdrawalClaimed`, `ValidatorSlashed`, `ValidatorJailed`, `ValidatorReactivated`, `ValidatorEscalatedS5`, `S6NoParticipationRecorded`, `S6PartialSlashFired`, `ValidatorBlacklisted`, `ValidatorUnblacklisted`, `SlasherContractAdded`, `SlasherContractRemoved`, `ActiveRegistrationIncremented`, `ActiveRegistrationDecremented`, `EncryptionKeyRegistered`, `MinStakeUpdated`, `UnbondingPeriodUpdated`, `ModelStakeBoundsUpdated`, `MaxConcurrentRegistrationsPerStakeUnitUpdated`, `SlashTreasuryUpdated`, `S5RecidivismParamsUpdated`, `S6ParamsUpdated`.
 
@@ -217,7 +279,7 @@ Plus the public getters for all state in §3.
 
 ---
 
-## 12. Deployment, Ownership & Upgradeability
+## 13. Deployment, Ownership & Upgradeability
 
 From `foundry/script/DeployPlatform.s.sol` (see [DeployPlatform](foundry/script/DeployPlatform.md)):
 
@@ -242,7 +304,7 @@ Until step 8, slasher management through the coordinator reverts `ValidatorStake
 
 ---
 
-## 13. Review Notes & Open Caveats
+## 14. Review Notes & Open Caveats
 
 - **No. 1 — S6 is not wired:** `recordNoParticipation` exists and is tested, but no task contract calls it, so the S6 counter never moves in practice.
 - **No. 2 — S5 escalation on a blacklisted validator reverts the whole slash:** escalation calls `_jailInternal`, which reverts `ValidatorIsBlacklisted`. A task contract's slashing loop hitting a blacklisted repeat offender would revert, not just skip that validator.
@@ -250,11 +312,11 @@ Until step 8, slasher management through the coordinator reverts `ValidatorStake
 - **No. 4 — Stale NatSpec:** `setModelStakeBounds` / `setMaxConcurrentRegistrationsPerStakeUnit` say "not yet enforced", but the task contracts enforce both (§8). `getModelStakeMin` says "set by the model owner", but the setter is `onlyOwner` (DIN-Representative). `modelMinStakeBounds[].max` is never read.
 - **No. 5 — Recidivism is per model:** the S5 ring is keyed by calling contract, so a validator faulting across many models never escalates unless it hits the threshold within one model.
 - **No. 6 — Blacklisted funds are frozen:** blacklisted validators cannot unstake or claim; there is no recovery path other than unblacklisting.
-- **No. 7 — Custody meets upgradeability:** see §12.
+- **No. 7 — Custody meets upgradeability:** see §13.
 
 ---
 
-## 14. Change Log
+## 15. Change Log
 
 ### P3 — slashing, jailing, parameters (foundry)
 
