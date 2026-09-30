@@ -6,7 +6,10 @@ upgradeable platform contracts: `DinToken`, `DinCoordinator`, `DinValidatorStake
 `DinFairLaunchDistributor`. All follow the OpenZeppelin Transparent Proxy pattern
 (`Initializable`, `OwnableUpgradeable`) and end their own block with a
 `uint256[50] private __gap` reservation to allow safe future additions. Contract-own slot numbers below are from
-`forge inspect <Contract> storageLayout`.
+`forge inspect <Contract> storageLayout`. OpenZeppelin v5 upgradeable bases
+(`Initializable`, `OwnableUpgradeable`, `ERC20Upgradeable`) keep their state in
+namespaced ERC-7201 storage, so they do not occupy these sequential slots; they are
+listed in brackets for completeness.
 
 ---
 
@@ -25,9 +28,10 @@ yet, so this repo currently adds new variables above `__gap` without shrinking i
 there's no deployed slot layout to preserve. Start shrinking `__gap` per addition as
 soon as a proxy is actually deployed and holds state worth preserving.
 
-**Inherited slots are fixed.** Slots occupied by OpenZeppelin base contracts
-(`_initialized`, `_owner`, etc.) are determined by their upstream storage layout and
-must not be touched.
+**Inherited storage is namespaced.** OpenZeppelin v5 upgradeable bases
+(`_initialized`, `_owner`, ERC-20 balances, etc.) live at ERC-7201 namespaced
+locations determined upstream, not in the contract's sequential slots. They must not
+be touched, and they do not shift when contract-own variables are added.
 
 **`ReentrancyGuardTransient` is slot-neutral.** `DinCoordinator`,
 `DinValidatorStake`, `DinEmission`, `DinFeeRouter`, `DinTreasury`,
@@ -42,33 +46,22 @@ storage slots.
 ## DinToken
 
 ```
-[Initializable]
-  _initialized      : uint64  (packed with _initializing bool)
-[OwnableUpgradeable]
-  _owner            : address
-[ERC20Upgradeable]
-  _balances         : mapping(address => uint256)
-  _allowances       : mapping(address => mapping(address => uint256))
-  _totalSupply      : uint256
-  _name             : string
-  _symbol           : string
+[Initializable]            (ERC-7201 namespaced)
+[ERC20Upgradeable]         (ERC-7201 namespaced: balances, allowances, totalSupply, name, symbol)
+[OwnableUpgradeable]       (ERC-7201 namespaced: _owner)
 ─────────────────────────────────── contract-own slots ───
-  coordinator       : address
-  __gap             : uint256[50]   ← 50 reserved slots
+  coordinator       : address                                slot 0
+  __gap             : uint256[50]                            slots 1–50
 ```
 
 `setCoordinator` is one-shot; `coordinator` will not change after initial wiring.
-Future variables must be inserted above `__gap`, reducing its size accordingly.
 
 ---
 
 ## DinCoordinator
 
 ```
-[Initializable]
-  _initialized      : uint64
-[OwnableUpgradeable]
-  _owner            : address
+[Initializable] [OwnableUpgradeable]   (ERC-7201 namespaced)
 ─────────────────────────────────── contract-own slots ───
   dinToken                    : DinToken             (slot 0)
   dinValidatorStakeContract   : IDinValidatorStake   (slot 1)
@@ -92,10 +85,7 @@ above for why that's fine pre-deployment.
 ## DinValidatorStake
 
 ```
-[Initializable]
-  _initialized      : uint64
-[OwnableUpgradeable]
-  _owner            : address
+[Initializable] [OwnableUpgradeable]   (ERC-7201 namespaced)
 ─────────────────────────────────── contract-own slots ───
   DIN_TOKEN                              : IERC20                                   (slot 0)
   DIN_COORDINATOR                        : address                                  (slot 1)
@@ -131,10 +121,7 @@ contract's top-level slot numbering.
 ## DINModelRegistry
 
 ```
-[Initializable]
-  _initialized      : uint64
-[OwnableUpgradeable]
-  _owner            : address
+[Initializable] [OwnableUpgradeable]   (ERC-7201 namespaced)
 [ReentrancyGuardTransient]
   (transient lock only — no persistent slot)
 ─────────────────────────────────── contract-own slots ───
@@ -163,10 +150,7 @@ Ownership is plain `OwnableUpgradeable` — there is no separate `daoAdmin` slot
 ## DinEmission
 
 ```
-[Initializable]
-  _initialized      : uint64
-[OwnableUpgradeable]
-  _owner            : address
+[Initializable] [OwnableUpgradeable]   (ERC-7201 namespaced)
 [ReentrancyGuardTransient]
   (transient lock only — no persistent slot)
 ─────────────────────────────────── contract-own slots ───
@@ -187,10 +171,7 @@ Ownership is plain `OwnableUpgradeable` — there is no separate `daoAdmin` slot
 ## DinFeeRouter
 
 ```
-[Initializable]
-  _initialized      : uint64
-[OwnableUpgradeable]
-  _owner            : address
+[Initializable] [OwnableUpgradeable]   (ERC-7201 namespaced)
 [ReentrancyGuardTransient]
   (transient lock only — no persistent slot)
 ─────────────────────────────────── contract-own slots ───
@@ -215,10 +196,7 @@ to 16 × `uint16`), but inserting a variable between `treasury` and
 ## DinTreasury
 
 ```
-[Initializable]
-  _initialized      : uint64
-[OwnableUpgradeable]
-  _owner            : address
+[Initializable] [OwnableUpgradeable]   (ERC-7201 namespaced)
 [ReentrancyGuardTransient]
   (transient lock only — no persistent slot)
 ─────────────────────────────────── contract-own slots ───
@@ -233,10 +211,7 @@ whole block is reserved.
 ## DinFairLaunchDistributor
 
 ```
-[Initializable]
-  _initialized      : uint64
-[OwnableUpgradeable]
-  _owner            : address
+[Initializable] [OwnableUpgradeable]   (ERC-7201 namespaced)
 [ReentrancyGuardTransient]
   (transient lock only — no persistent slot)
 ─────────────────────────────────── contract-own slots ───

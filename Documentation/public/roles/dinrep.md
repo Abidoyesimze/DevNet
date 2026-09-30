@@ -1,39 +1,122 @@
 # DIN-Representative Documentation
 
-The DIN-Representative administers the core infrastructure contracts of the DIN network (a DIN-DAO is planned to take over this role after mainnet). This includes deploying the fundamental contracts and authorizing participants (slashers) who can penalize misbehaving validators.
+The DIN-Representative administers the core infrastructure contracts of the DIN network. This includes deploying the platform contracts, approving model registrations and manifest updates, setting registry fees, and authorizing participants (slashers) who can penalize misbehaving validators.
+
+Today the DIN-Representative is a single admin key: the `owner()` of the platform contracts. On-chain DIN-DAO governance is deferred to post-mainnet; until then, governance happens off-chain.
+
+The CLI commands for this role live under `dincli dinrep`.
 
 ---
 
 ## 1. Deployment
 
-Deploy the core contracts in the order listed below. Each contract depends on the previous one being live.
+The platform contracts (`DinTreasury`, `DinToken`, `DinCoordinator`, `DinValidatorStake`, `DINModelRegistry`, `DinFeeRouter`, `DinEmission`) are deployed behind OpenZeppelin Transparent Proxies by the Foundry script `foundry/script/DeployPlatform.s.sol`. The script also initializes and wires the contracts, then writes the proxy and ProxyAdmin addresses to `foundry/deployments/<network>.json`. After it runs, import that file into `dincli`.
+
+The output file is named after the chain the script ran against:
+
+| Chain | Chain ID | Deployments file |
+|-------|----------|------------------|
+| Local anvil / hardhat node | 1337 / 31337 | `foundry/deployments/localhost.json` |
+| Optimism Sepolia | 11155420 | `foundry/deployments/sepolia_op_devnet.json` |
+
+On any other chain the script reverts unless you set `DEPLOYMENTS_NETWORK=<name>` to choose the file name.
 
 > [!NOTE]
-> The `--artifact` flag must point to the compiled JSON output from Hardhat/ Foundry (contains the ABI and bytecode).
+> Both flows run from the repo root and need `npm ci` in `foundry/` first. The OpenZeppelin upgrade-safety validation that runs during the deploy calls `npx @openzeppelin/upgrades-core` from `foundry/node_modules`.
 
-### 1. DIN Coordinator
+### 1a. Local network (anvil)
 
-The main coordinator contract that governs network-wide operations.
-
-```bash
-dincli dinrep deploy din-coordinator --artifact <path_to_artifact>
-```
-
-### 2. Validator Stake
-
-The staking contract used by validators (Auditors, Aggregators).
+**1. Start a local chain.** `anvil.sh` runs a private chain (chain ID 1337) on `http://127.0.0.1:8545` with pre-funded dev accounts:
 
 ```bash
-dincli dinrep deploy din-validator-stake --artifact <path_to_artifact>
+./foundry/anvil.sh
 ```
 
-### 3. Model Registry
-
-Records federated learning tasks, assigns a unique `model_id` to each task, and stores the initial global model reference and manifest for a task.
+**2. Deploy.** `--unlocked` lets anvil sign for its dev account 0, so no private key is needed:
 
 ```bash
-dincli dinrep deploy din-model-registry --artifact <path_to_artifact>
+cd foundry && npm ci
+forge clean
+forge script script/DeployPlatform.s.sol \
+  --rpc-url http://127.0.0.1:8545 \
+  --broadcast \
+  --sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+  --unlocked
+cd ..
 ```
+
+This writes `foundry/deployments/localhost.json`. That file is gitignored, because it is regenerated on every local deploy.
+
+**3. Import into dincli:**
+
+```bash
+dincli --network local system import-deployments
+```
+
+### 1b. Optimism Sepolia
+
+Optimism Sepolia is a public chain, so there is no anvil step. Instead you need an RPC endpoint and a funded signing key.
+
+**1. Prerequisites**
+
+- **RPC endpoint.** Use the same endpoint dincli uses: `SEPOLIA_OP_DEVNET_RPC_URL` in `.env.sepolia_op_devnet` at the repo root. The file is gitignored, so create it from [`.env.example`](../../../.env.example) if you don't have one yet. Load it into your shell:
+
+  ```bash
+  set -a; source .env.sepolia_op_devnet; set +a
+  ```
+
+- **Signing key.** Import the DIN-Representative key into Foundry's encrypted keystore once. This prompts for the private key and a password:
+
+  ```bash
+  cast wallet import <keystore_name> --interactive
+  cast wallet address --account <keystore_name>    # prints the DIN-Representative address
+  ```
+
+  The deploying address becomes the owner of every platform contract and every ProxyAdmin, so use the DIN-Representative key.
+
+- **Funds.** The address needs Optimism Sepolia ETH. A full deploy is roughly 30 transactions: seven implementations, seven proxies, and the wiring calls.
+
+**2. Deploy:**
+
+```bash
+cd foundry && npm ci
+forge clean
+forge script script/DeployPlatform.s.sol \
+  --rpc-url "$SEPOLIA_OP_DEVNET_RPC_URL" \
+  --broadcast \
+  --account <keystore_name> \
+  --sender <din_representative_address>
+cd ..
+```
+
+To also verify the contracts on the block explorer, add `--verify --etherscan-api-key "$ETHERSCAN_API_KEY"`.
+
+Alternatively, `--rpc-url optimism-sepolia` uses the `foundry.toml` RPC alias. That alias builds an Infura URL from `INFURA_API_KEY`, which forge loads automatically from `foundry/.env` (gitignored), so it works without sourcing `.env.sepolia_op_devnet`.
+
+This writes `foundry/deployments/sepolia_op_devnet.json`. Unlike `localhost.json`, this file is **committed**: it is the network's public record of the platform addresses.
+
+> [!TIP]
+> Run once without `--broadcast` first. Forge then only simulates the deploy against the live chain state, so you can check the sender, the balance, and the upgrade-safety validation without spending gas.
+
+**3. Import into dincli:**
+
+```bash
+dincli --network sepolia_op_devnet system import-deployments
+```
+
+### Import options
+
+`import-deployments` reads `foundry/deployments/<network>.json` for the active dincli network by default. The other sources are:
+
+```bash
+dincli system import-deployments --file <path_to_deployments_json>   # any explicit file
+dincli system import-deployments --hardhat                           # hardhat/deployments/<network>.json
+```
+
+`--hardhat` reads output from the secondary Hardhat toolchain (`cd hardhat && npx hardhat run scripts/deploy-platform.ts --network <network>`).
+
+> [!NOTE]
+> Native proxy deployment from `dincli` (`dincli dinrep deploy ...`) is planned but not implemented yet. See [dincli-native-proxy-deployment.md](../../../Developer/issues/dincli-native-proxy-deployment.md).
 
 ---
 
@@ -51,12 +134,18 @@ dincli dinrep registry total-models
 
 ### Model Registration Approval
 
-Model registration follows a **request → approval** flow. Model Owners submit requests; the DIN-Representative reviews and approves or rejects them.
+Model registration follows a **request → approval** flow. Model Owners submit requests, and the DIN-Representative approves or rejects each one.
 
-**List pending registration requests:**
+**List pending requests** (model registrations and manifest updates; `-t` narrows the list to one type):
 
 ```bash
-dincli dinrep registry list-pending-requests [--type model|manifest]
+dincli dinrep registry list-pending-requests [-t model|manifest]
+```
+
+**Inspect a single request:**
+
+```bash
+dincli dinrep registry explore-request -t model <requestId>
 ```
 
 **Approve a model registration request:**
@@ -80,7 +169,7 @@ The registration fee is retained by the contract in both cases.
 
 ### Manifest Update Approval
 
-Manifest updates also follow a request → approval flow.
+Manifest updates also follow a request → approval flow. Use `explore-request -t manifest <requestId>` to inspect a request before deciding.
 
 **Approve a manifest update:**
 
@@ -101,7 +190,7 @@ dincli dinrep registry reject-manifest-update <requestId>
 
 ### Kill Switch — Disable / Enable Models
 
-Disable a model immediately. This blocks manifest update requests from the model owner and should be checked by downstream contracts (`TaskCoordinator`, `TaskAuditor`) before executing any model tasks.
+Disable a model immediately. A disabled model's owner can't submit manifest update requests, and pending updates for it can't be approved.
 
 ```bash
 # Disable a model (emergency stop)
@@ -112,7 +201,7 @@ dincli dinrep registry enable-model <modelId>
 ```
 
 > [!CAUTION]
-> Disabling a model does not delete it. All on-chain history is preserved. Downstream contracts must actively check `modelDisabled(modelId)` for the kill switch to have operational effect.
+> Disabling a model does not delete it. All on-chain history is preserved. Today the task contracts (`DINTaskCoordinator`, `DINTaskAuditor`) do **not** check `modelDisabled(modelId)`, so disabling only blocks manifest updates. It does not stop the model's running GIs, submissions or slashing.
 
 ---
 
@@ -127,7 +216,7 @@ The registry charges fees for model registration and manifest update requests. A
 | `openSourceUpdateFee` | 0.0000001 ETH | Open-source manifest update requests |
 | `proprietaryUpdateFee` | 0.000001 ETH | Proprietary manifest update requests |
 
-**Update a single fee:**
+**Update a single fee** (amounts in ETH):
 
 ```bash
 dincli dinrep registry set-open-source-fee <eth>
@@ -136,7 +225,7 @@ dincli dinrep registry set-open-source-update-fee <eth>
 dincli dinrep registry set-proprietary-update-fee <eth>
 ```
 
-**Update all fees atomically (preferred for governance proposals):**
+**Update all fees atomically** (amounts in ETH):
 
 ```bash
 dincli dinrep registry set-fees \
@@ -207,10 +296,9 @@ dincli dinrep add-slasher --contract <contract_address>
 
 ## Workflow
 
-1. **Deploy** — Coordinator → Validator Stake → Model Registry (in order).
+1. **Deploy** — Run the Foundry `DeployPlatform.s.sol` script (§1a local, §1b Optimism Sepolia), then `dincli system import-deployments`.
 2. **Configure Slashers** — After each new task is created, register its Task Coordinator and Task Auditor as slashers.
 3. **Process Registration Requests** — Review pending `ModelRequest` entries; approve or reject each one.
 4. **Process Manifest Update Requests** — Review pending `ManifestUpdateRequest` entries.
 5. **Monitor** — Use registry commands to track network growth and model status.
 6. **Emergency** — Use `disable-model` if a model needs to be stopped immediately.
-

@@ -1,20 +1,17 @@
 import os
-import time
 from importlib.resources import files
 
 import typer
 
 from dincli.cli.contract_utils import get_contract_instance
-from dincli.cli.utils import (build_and_send_tx, get_env_key, load_din_info,
-                               resolve_task_coordinator_address, save_din_info)
+from dincli.cli.utils import (build_and_send_tx, get_env_key,
+                               resolve_task_coordinator_address)
 
 app = typer.Typer(help="Commands for the DIN-Representative")
 
-registry_app = typer.Typer(help="Registry sub-app (for 'dincli dinrep registry to interact with DINRegistry ...')")
-deploy_app = typer.Typer(help="Deploy DIN smart contracts")
+registry_app = typer.Typer(help="Registry sub-app ('dincli dinrep registry ...') to interact with DINModelRegistry")
 coordinator_app = typer.Typer(help="Coordinator sub-app ('dincli dinrep coordinator ...') to interact with DinCoordinator")
 
-app.add_typer(deploy_app, name="deploy")
 app.add_typer(registry_app, name="registry")
 app.add_typer(coordinator_app, name="coordinator")
 
@@ -54,145 +51,10 @@ def _print_manifest_request(console, w3, request_id: int, req):
     console.print(f"  Fee Paid: {w3.from_wei(req[3], 'ether')} ETH")
     console.print(f"  Status: {_request_status(req[4], req[5])}")
 
-@deploy_app.command()
-def din_coordinator(
-    ctx: typer.Context,
-    artifact_path: str = typer.Option(None, "--artifact", help="Path to contract artifact JSON (Hardhat format)")
-):
-    
-    """
-    Deploy the DIN Coordinator contract.
-    """
-    effective_network, w3, account, console = ctx.obj.get_en_w3_account_console()
-    
-    DINCoordinator_contract = get_contract_instance(artifact_path, effective_network)
-    
-    tx_receipt = build_and_send_tx(
-        ctx,
-        DINCoordinator_contract.constructor(),
-        "Deploying DIN Coordinator Contract",
-        "DINCoordinator contract deployed successfully",
-        "Failed to deploy DIN Coordinator Contract"
-    )
-    
-    dincoordinator_contract_address = tx_receipt.contractAddress
-        
-    console.print("DINCoordinator contract deployed at:", dincoordinator_contract_address)
-    
-    din_addresses = load_din_info()
-    din_addresses[effective_network]["coordinator"] = dincoordinator_contract_address
-    din_addresses[effective_network]["representative"] = account.address 
-    save_din_info(din_addresses)
-
-    taskCoordinator_contract = ctx.obj.get_deployed_din_coordinator_contract(verbose=False)
-    
-    dintoken_address = taskCoordinator_contract.functions.dinToken().call()
-    console.print("DINtoken contract deployed at:", dintoken_address)
-    din_addresses = load_din_info()
-    din_addresses[effective_network]["token"] = dintoken_address
-    save_din_info(din_addresses)
-
-
-    
-@deploy_app.command("din-validator-stake")
-def din_validator_stake(
-    ctx: typer.Context,
-    artifact_path: str = typer.Option(..., "--artifact", help="Path to contract artifact JSON (Hardhat/Brownie format)"),
-    dinCoordinator: str  = typer.Option(None, "--dinCoordinator", help="the dinCoordinator asddress"),
-    dinToken: str  = typer.Option(None, "--dinToken", help="the dinToken asddress"),
-                                        
-):
-    
-    """
-    Deploy the DIN Validator Stake contract.
-    """
-    effective_network, w3, account, console = ctx.obj.get_en_w3_account_console()
-    
-    DINValidatorStake_contract = get_contract_instance(artifact_path, effective_network)
-    
-    din_addresses = load_din_info()
-    
-    if dinCoordinator:
-        dinCoordinator_address = dinCoordinator
-    else:
-        dinCoordinator_address = din_addresses[effective_network]["coordinator"]
-        
-    if dinToken:
-        dinToken_address = dinToken
-    else:
-        dinToken_address = din_addresses[effective_network]["token"]
-    
-    tx_receipt = build_and_send_tx(
-        ctx,
-        DINValidatorStake_contract.constructor(dinToken_address, dinCoordinator_address),
-        "Deploying DIN Validator Stake Contract",
-        "DINValidatorStake contract deployed successfully",
-        "Failed to deploy DIN Validator Stake Contract"
-    )
-    
-    DINValidatorStake_contract_address = tx_receipt.contractAddress
-        
-    console.print("DINValidatorStake contract deployed at:", DINValidatorStake_contract_address)
-    
-    din_addresses[effective_network]["stake"] = DINValidatorStake_contract_address
-
-    save_din_info(din_addresses)
-    
-    deployed_DINValidatorStake_Contract = ctx.obj.get_deployed_din_stake_contract()
-    
-    
-    DINCoordinator_Contract = ctx.obj.get_deployed_din_coordinator_contract()
-    
-    # add delay to allow the 
-    time.sleep(10)
-
-
-    build_and_send_tx(
-        ctx,
-        DINCoordinator_Contract.functions.updateValidatorStakeContract(deployed_DINValidatorStake_Contract.address),
-        "Adding DinValidatorStake contract to DINCoordinator contract",
-        "DinValidatorStake contract added to DINCoordinator contract successfully",
-        "Failed to add DinValidatorStake contract to DINCoordinator contract"
-    )
-
-
-@deploy_app.command("din-model-registry")
-def deploy_din_model_registry(
-    ctx: typer.Context,
-    artifact_path: str = typer.Option(..., "--artifact", help="Path to contract artifact JSON (Hardhat/Brownie format)"),
-    dinvalidatorstake: str = typer.Option(None, "--dinvalidatorstake", help="the dinvalidatorstake address"),
-):
-    
-    effective_network, w3, account, console = ctx.obj.get_en_w3_account_console()
-    
-    DINModelRegistry_contract = get_contract_instance(artifact_path, effective_network)
-    
-    din_addresses = load_din_info()
-
-    if dinvalidatorstake:
-        dinValidatorStake_address = dinvalidatorstake
-    else:
-        dinValidatorStake_address = din_addresses[effective_network]["stake"]
-    
-    tx_receipt = build_and_send_tx(
-        ctx,
-        DINModelRegistry_contract.constructor(dinValidatorStake_address),
-        "Deploying DIN Model Registry",
-        "DINModelRegistry contract deployed successfully",
-        "Failed to deploy DINModelRegistry contract"
-    )
-    
-    DINModelRegistry_contract_address = tx_receipt.contractAddress
-    console.print("[bold green] ✅ DINModelRegistry contract deployed at:[/bold green]", DINModelRegistry_contract_address)
-    
-    din_addresses[effective_network]["registry"] = DINModelRegistry_contract_address
-    
-    save_din_info(din_addresses)
-    
 @app.command("add-slasher",
-    help="Add a slasher to the DIN SlasherRegistry contract."
-    "You must specify either the task coordinator or the task auditor (from config) to be registered as the slasher."
-    "The contract address can be provided explicitly or loaded from config."
+    help="Authorize a slasher contract via DinCoordinator.addSlasherContract. "
+    "Pass --contract with an explicit address, or --taskCoordinator / --taskAuditor "
+    "to load the task contract address from config."
 )
 def add_slasher(
     ctx: typer.Context,
@@ -211,8 +73,6 @@ def add_slasher(
 ):
     
     effective_network, w3, account, console = ctx.obj.get_en_w3_account_console()
-    
-    DINCoordinator_Contract = ctx.obj.get_deployed_din_coordinator_contract()
 
     if contract:
         contract_address = contract
@@ -237,6 +97,14 @@ def add_slasher(
             f"[bold green] ✓ Using DINTaskAuditor Address: {contract_address} "
             f"(from {os.getcwd()}/.env)[/bold green]"
         )
+    else:
+        console.print(
+            "[bold red]✗ No slasher contract given.[/bold red] "
+            "Pass --contract <address>, --taskCoordinator, or --taskAuditor."
+        )
+        raise typer.Exit(1)
+
+    DINCoordinator_Contract = ctx.obj.get_deployed_din_coordinator_contract()
 
     build_and_send_tx(
         ctx,
