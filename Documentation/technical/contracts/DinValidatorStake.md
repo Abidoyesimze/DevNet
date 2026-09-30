@@ -14,7 +14,7 @@
 - holds validators' DIN and tracks each validator's lifecycle status (`None` / `Active` / `Exiting` / `Jailed` / `Blacklisted`);
 - enforces an unbonding delay during which unstaked DIN **stays slashable**;
 - lets authorised slasher contracts (each model's `DINTaskCoordinator` / `DINTaskAuditor`) slash, with three flavours: full-severity `slash`, partial `slashPartial` with **S5 recidivism** escalation, and the **S6 no-participation** counter;
-- splits every slashed amount **50% burned / 50% to `slashTreasury`** (`DinTreasury`);
+- splits every slashed amount **50% burned / 50% to `slashTreasury`** (`DinTreasury`), or burns that half too if no treasury is set;
 - supports **jailing** (automatic on S5 escalation) and self-service `reactivate()` after the jail period;
 - stores governable parameters (`MIN_STAKE`, `UNBONDING_PERIOD`, per-model stake floors, concurrent-registration cap, S5/S6 parameters) that the task contracts read at registration and slashing time;
 - keeps validators' X25519 encryption keys for encrypted test-data delivery, and a per-validator active-registration counter.
@@ -258,7 +258,7 @@ Until step 8, slasher management through the coordinator reverts `ValidatorStake
 
 ### P3 — slashing, jailing, parameters (foundry)
 
-- Slashed DIN is now disposed of: 50% burned, 50% to `slashTreasury` (`setSlashTreasury`).
+- Slashed DIN is now disposed of: 50% burned, 50% to `slashTreasury` (`setSlashTreasury`), or also burned if no treasury is set.
 - Added `slashPartial` with S5 recidivism escalation (per-caller ring), `recordNoParticipation` (S6), `jailValidator` / `reactivate`.
 - `MIN_STAKE` and `UNBONDING_PERIOD` became owner-settable storage; added per-model stake bounds, the concurrent-registration cap, the active-registration counter, and X25519 encryption-key registration.
 

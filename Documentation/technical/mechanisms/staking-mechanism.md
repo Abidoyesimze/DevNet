@@ -77,7 +77,7 @@ The core staking and validator-lifecycle contract. It:
 - enforces delayed withdrawals with an unbonding period;
 - keeps pending withdrawals slashable;
 - exposes `isValidatorActive()` for downstream eligibility checks;
-- splits every slash 50% burn / 50% treasury, tracks S5 recidivism (`slashPartial`) and jails on escalation;
+- splits every slash 50% burn / 50% treasury (the treasury half is also burned if no treasury is set), tracks S5 recidivism (`slashPartial`) and jails on escalation;
 - stores the governable parameters task contracts read (per-model stake floors, concurrent-registration cap, S5/S6 settings) and validators' X25519 encryption keys;
 - allows emergency blacklist and restoration through direct owner authority.
 
@@ -175,7 +175,7 @@ Those role contracts should:
 2. Authorized task contract determines slash amount and reason.
 3. Task contract calls `DinValidatorStake.slashPartial()` (liveness faults, with S5 recidivism escalation) or `slash()` (full-severity faults).
 4. Slash is applied first against `activeStake`, then against `pendingWithdrawals` if needed.
-5. Half the slashed DIN is burned, half sent to `DinTreasury`; validator status is resynchronized (or set to `Jailed` on S5 escalation).
+5. Half the slashed DIN is burned, half sent to `DinTreasury` (or also burned if no treasury is set); validator status is resynchronized (or set to `Jailed` on S5 escalation).
 6. Validator may lose `Active` status if stake falls too low or if exit is already in progress.
 
 ### 4. Exit / Unbonding
