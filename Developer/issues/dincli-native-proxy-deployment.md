@@ -21,6 +21,12 @@ runtime dependency, hardhat env keys instead of the dincli wallet, coupling to
 the deployments file) and dies when `hardhat/` is deleted (Foundry-only
 decision, 2026-07-03).
 
+Update (2026-09-25): the interim flow now defaults to Foundry —
+`forge script foundry/script/DeployPlatform.s.sol` (seven platform contracts)
+followed by `dincli system import-deployments` (reads
+`foundry/deployments/<net>.json`); the hardhat script remains the secondary
+path via `--hardhat`.
+
 ## Work
 
 Per contract (DinToken, DinCoordinator, DinValidatorStake, DINModelRegistry),
@@ -38,8 +44,9 @@ Supporting pieces (from the record §6):
   `bytecode: {object: "0x…"}` in `get_contract_instance` / deploy path
 - ship/pin the OZ `TransparentUpgradeableProxy` artifact (v5.x) with dincli —
   do not recompile it ad hoc
-- new `dinrep deploy din-token` command; existing deploy commands become
-  proxy-aware; write resulting addresses (incl. `proxy_admin`) to `din_info.json`
+- a `dinrep deploy` sub-app with one proxy-aware command per platform contract
+  (the old constructor-based `dinrep deploy din-coordinator/din-validator-stake/din-model-registry`
+  commands were removed because they could not deploy the proxied contracts); write resulting addresses (incl. `proxy_admin`) to `din_info.json`
 - scope: **V1 bootstrap only** — upgrades stay behind the toolchain scripts
 
 ## Acceptance
