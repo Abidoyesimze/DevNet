@@ -161,7 +161,7 @@ Used by: `DINTaskAuditor`
 
 ```solidity
 interface IDINTaskAuditor {
-    function createAuditorsBatches(uint _GI) external returns (bool);
+    function createAuditorsBatches(uint _GI, bytes32 seed) external returns (bool);
     function setTestDataAssignedFlag(uint _GI, bool flag) external;
     function finalizeEvaluation(uint _GI) external returns (bool);
     function slashAuditors(uint _GI) external returns (bool);
@@ -174,7 +174,7 @@ Used by: `DINTaskCoordinator`
 
 | Method | Purpose |
 |--------|---------|
-| `createAuditorsBatches` | Called by coordinator to trigger batch formation in auditor contract |
+| `createAuditorsBatches` | Called by coordinator to trigger batch formation in auditor contract; `seed` is the coordinator's locked `auditSeed[_GI]` (issue #156 H-2, task_240926_18 Part B) — reverts `TA_AuditSeedNotLocked` if zero |
 | `setTestDataAssignedFlag` | Signals that test datasets have been distributed to batches |
 | `finalizeEvaluation` | Computes final median scores and approval status for all submitted models; reverts unless `GIstate == LMSevaluationRevealStarted` |
 | `slashAuditors` | Called by coordinator once `GIstate == T2AggregationDone`; slashes auditors who missed their vote, then coordinator transitions to `AuditorsSlashed` |
@@ -277,6 +277,22 @@ Used by: `DINTaskCoordinator`
 | `TC_FailedToFinalizeEvaluation` | `finalizeEvaluation` returned false |
 | `TC_AggregatorNotActive` | Aggregator's `DinValidatorStake.isValidatorActive()` is false |
 | `TC_FailedToSlashAuditors` | `DINTaskAuditor.slashAuditors()` returned false |
+
+### 4.4 Batch-Assignment Seed Lock (issue #156 H-2, task_240926_18 Part B)
+
+Mirrors the dispute-seed errors' shape (`TC_DisputeSeedNotLocked`/`TC_DisputeSeedBlockNotMined`/`TC_DisputeSeedAlreadyLocked`, `DINTaskCoordinator.sol`'s `lockDisputeSeed` — dispute resolution isn't yet documented in `DINTaskCoordinator.md`, a pre-existing gap from PR #171/task_16 Part A, out of scope here), one set per seed pair. See `DINTaskCoordinator.md` §11.1 for the full lock mechanism this PR adds.
+
+| Error | Description |
+|-------|-------------|
+| `TC_AggSeedNotAnchored` | `lockAggSeed` called before `aggSeedBlock[_GI]` has been set (i.e. before `closeLMsubmissionsEvaluation`) |
+| `TC_AggSeedBlockNotMined` | `lockAggSeed` called before `block.number > aggSeedBlock[_GI]` |
+| `TC_AggSeedAlreadyLocked` | `lockAggSeed` called when `aggSeed[_GI]` is already non-zero |
+| `TC_AggSeedNotLocked` | `autoCreateTier1AndTier2` called while `aggSeed[_GI] == bytes32(0)` |
+| `TC_AuditSeedNotAnchored` | `lockAuditSeed` called before `auditSeedBlock[_GI]` has been set (i.e. before `closeLMsubmissions`) |
+| `TC_AuditSeedBlockNotMined` | `lockAuditSeed` called before `block.number > auditSeedBlock[_GI]` |
+| `TC_AuditSeedAlreadyLocked` | `lockAuditSeed` called when `auditSeed[_GI]` is already non-zero |
+| `TC_AuditSeedNotLocked` | `createAuditorsBatches` called while `auditSeed[_GI] == bytes32(0)` |
+| `TA_AuditSeedNotLocked` | `DINTaskAuditor.createAuditorsBatches(uint, bytes32)` independently rejects a zero seed — defense-in-depth on top of the coordinator's own `TC_AuditSeedNotLocked` check, same precedent as M-3 (no single point of trust) |
 
 ---
 

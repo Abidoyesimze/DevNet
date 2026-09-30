@@ -196,6 +196,7 @@ contract AggregatorCommitRevealTest is Test {
 
         vm.startPrank(modelOwner);
         tc.closeLMsubmissions(1);
+        _lockAuditSeedNow(1); // issue #156 H-2
         tc.createAuditorsBatches(1);
         tc.setTestDataAssignedFlag(1, true);
         tc.startLMsubmissionsEvaluation(1);
@@ -222,9 +223,25 @@ contract AggregatorCommitRevealTest is Test {
 
         vm.startPrank(modelOwner);
         tc.closeLMsubmissionsEvaluation(1);
+        _lockAggSeedNow(1); // issue #156 H-2
         tc.autoCreateTier1AndTier2(1);
         tc.startT1Aggregation(1);
         vm.stopPrank();
+    }
+
+    /// @dev issue #156 H-2: rolls past disputeSeedDelay and locks the
+    ///      auditor-batch seed for `gi`. Small helper (mirrors
+    ///      DisputeResolution.t.sol's identically-named helpers) so this
+    ///      fixture doesn't inline the roll+lock twice.
+    function _lockAuditSeedNow(uint gi) internal {
+        vm.roll(block.number + tc.disputeSeedDelay() + 1);
+        tc.lockAuditSeed(gi);
+    }
+
+    /// @dev Same as _lockAuditSeedNow, for the T1/T2 aggregation seed.
+    function _lockAggSeedNow(uint gi) internal {
+        vm.roll(block.number + tc.disputeSeedDelay() + 1);
+        tc.lockAggSeed(gi);
     }
 
     // ─────────────────────────────────────────────────────────────────────

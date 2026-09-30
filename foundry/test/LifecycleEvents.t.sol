@@ -214,6 +214,11 @@ contract LifecycleEventsTest is Test {
 
         vm.startPrank(modelOwner);
         tc.closeLMsubmissions(giIndex);
+        vm.stopPrank();
+        vm.roll(block.number + tc.disputeSeedDelay() + 1); // issue #156 H-2: seed lock
+        tc.lockAuditSeed(giIndex);
+
+        vm.startPrank(modelOwner);
         tc.createAuditorsBatches(giIndex);
         tc.setTestDataAssignedFlag(giIndex, true);
         tc.startLMsubmissionsEvaluation(giIndex);
@@ -246,6 +251,11 @@ contract LifecycleEventsTest is Test {
 
         vm.startPrank(modelOwner);
         tc.closeLMsubmissionsEvaluation(giIndex);
+        vm.stopPrank();
+        vm.roll(block.number + tc.disputeSeedDelay() + 1); // issue #156 H-2: seed lock
+        tc.lockAggSeed(giIndex);
+
+        vm.startPrank(modelOwner);
         tc.autoCreateTier1AndTier2(giIndex);
         tc.startT1Aggregation(giIndex);
         vm.stopPrank();
@@ -549,6 +559,11 @@ contract LifecycleEventsTest is Test {
         emit DINTaskCoordinator.GIStateChanged(1, GI_LMS_CLOSED);
         vm.prank(modelOwner); tc.closeLMsubmissions(1);
 
+        // issue #156 H-2: seed lock (emits its own event, so this must land
+        // before the expectEmit below rather than between it and the call)
+        vm.roll(block.number + tc.disputeSeedDelay() + 1);
+        tc.lockAuditSeed(1);
+
         // AuditorsBatchesCreated
         vm.expectEmit(true, true, false, false, address(tc));
         emit DINTaskCoordinator.GIStateChanged(1, GI_AUDITOR_BATCHES_CREATED);
@@ -588,6 +603,11 @@ contract LifecycleEventsTest is Test {
         vm.expectEmit(true, true, false, false, address(tc));
         emit DINTaskCoordinator.GIStateChanged(1, GI_LMS_EVAL_CLOSED);
         vm.prank(modelOwner); tc.closeLMsubmissionsEvaluation(1);
+
+        // issue #156 H-2: seed lock (emits its own event, so this must land
+        // before the expectEmit below rather than between it and the call)
+        vm.roll(block.number + tc.disputeSeedDelay() + 1);
+        tc.lockAggSeed(1);
 
         // T1nT2Bcreated
         vm.expectEmit(true, true, false, false, address(tc));

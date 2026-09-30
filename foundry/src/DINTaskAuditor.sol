@@ -147,7 +147,7 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
     ///         is allowed to cost auditors stake, per MECHANISM_DESIGN.md §6.
     bool public s3SlashingEnabled = false;
 
-    /// @notice S1 liveness-fault slash fraction in basis points (0–10000).
+    /// @notice S1 liveness-fault slash fraction in basis points (1–10000).
     ///         Applied to AUD_NO_VOTE (missed audit vote) slashes only.
     ///         S3 deviation slashes keep a full minStake() amount regardless.
     ///         30% default: three consecutive misses ~= full floor stake,
@@ -203,9 +203,9 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
     /// @dev Only affects AUD_NO_VOTE slashes. S3 deviation slashes keep
     ///      the full minStake() amount. Setting to 10000 restores the previous
     ///      flat-minStake behavior.
-    /// @param bps New fraction in basis points (0–10000).
+    /// @param bps New fraction in basis points (1–10000).
     function setS1SlashFractionBps(uint256 bps) external onlyOwner {
-        if (bps > 10_000) revert TA_InvalidSlashFraction();
+        if (bps == 0 || bps > 10_000) revert TA_InvalidSlashFraction();
         uint256 old = s1SlashFractionBps;
         s1SlashFractionBps = bps;
         emit S1SlashFractionBpsUpdated(old, bps);
@@ -762,12 +762,12 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
     }
 
     // ──────────── internal shuffle helpers ────────────
-    function _shuffleAddressArray(address[] memory arr) internal view {
+    function _shuffleAddressArray(address[] memory arr, bytes32 seed) internal pure {
         if (arr.length < 2) return;
         for (uint i = arr.length - 1; i > 0; i--) {
             uint j = uint(
                 keccak256(
-                    abi.encodePacked(blockhash(block.number - 1), i, arr.length)
+                    abi.encodePacked(seed, i, arr.length)
                 )
             ) % (i + 1);
             (arr[i], arr[j]) = (arr[j], arr[i]);
@@ -798,11 +798,11 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
         }
     }
 
-    function _shuffleUintArray(uint[] memory arr) internal view {
+    function _shuffleUintArray(uint[] memory arr, bytes32 seed) internal pure {
         for (uint i = arr.length - 1; i > 0; i--) {
             uint j = uint(
                 keccak256(
-                    abi.encodePacked(block.timestamp, i, arr.length, msg.sender)
+                    abi.encodePacked(seed, i, arr.length)
                 )
             ) % (i + 1);
             (arr[i], arr[j]) = (arr[j], arr[i]);
@@ -841,23 +841,34 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
     }
 
     /// @notice Partitions active auditors and submitted models into audit batches.
-    /// @dev Called by the paired DINTaskCoordinator. Auditors are filtered to those
-    ///      still Active at call time, then shuffled with blockhash-based entropy.
-    ///      Returns false is never reached; reverts on any failure condition.
+    /// @dev Called by the paired DINTaskCoordinator, which has already locked
+    ///      and passed in `seed` (issue #156 H-2) -- anchored at
+    ///      DINTaskCoordinator.closeLMsubmissions, before this function could
+    ///      possibly run, so nobody can steer batch assignment by timing the
+    ///      call. Rejects a zero seed independently of the coordinator's own
+    ///      check (defense-in-depth, same principle as the M-3 fix elsewhere
+    ///      in this contract). Returns false is never reached; reverts on any
+    ///      failure condition.
     /// @param _GI Current GI index.
+    /// @param seed Locked, ungrindable seed from DINTaskCoordinator.auditSeed.
     /// @return True on success.
     function createAuditorsBatches(
-        uint _GI
+        uint _GI,
+        bytes32 seed
     ) external onlyTaskCoordinator onlyCurrentGI(_GI) returns (bool) {
         if (dintaskcoordinatorContract.GIstate() != GIstates.LMSclosed)
             revert TA_CannotCreateAuditorsBatches();
+        if (seed == bytes32(0)) revert TA_AuditSeedNotLocked();
 
         // Filter the historical registration list down to currently active auditors.
         address[] memory auditorPool = _activeAuditorPool(_GI);
         uint aLen = auditorPool.length;
 
         if (aLen < params.auditorsPerBatch) revert TA_NotEnoughAuditors();
-        _shuffleAddressArray(auditorPool);
+        // Domain-separated derived seeds, same reasoning as the coordinator's
+        // AGG_ADDR/AGG_IDX split -- independent of aggSeed since this derives
+        // from the separately-locked auditSeed.
+        _shuffleAddressArray(auditorPool, keccak256(abi.encodePacked(seed, "AUD_ADDR")));
 
         // ▸ 2. Build list of local model indexes
         LMSubmission[] storage lmlist = lmSubmissions[_GI];
@@ -866,7 +877,7 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
         for (uint i = 0; i < lmlist.length; i++) {
             modelIdx[i] = i;
         }
-        _shuffleUintArray(modelIdx);
+        _shuffleUintArray(modelIdx, keccak256(abi.encodePacked(seed, "AUD_IDX")));
 
         // ▸ 3. Create batches, Greedily fill Auditors batches
         uint vPtr;
@@ -1346,12 +1357,16 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
 
                 if (missedVote) {
                     // S1: partial slash via slashPartial (tracks S5 recidivism).
-                    uint256 actualSlashed = dinvalidatorStakeContract.slashPartial(
-                        auditor,
-                        s1Amount,
-                        "AUD_NO_VOTE",
-                        _GI
-                    );
+                    // Skip when rounding reduces s1Amount to 0 — slashPartial
+                    // reverts InvalidSlashAmount on zero, bricking the GI.
+                    uint256 actualSlashed = s1Amount > 0
+                        ? dinvalidatorStakeContract.slashPartial(
+                            auditor,
+                            s1Amount,
+                            "AUD_NO_VOTE",
+                            _GI
+                        )
+                        : 0;
                     emit AuditorSlashed(
                         _GI,
                         b,

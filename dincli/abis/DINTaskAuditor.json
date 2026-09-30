@@ -420,6 +420,11 @@
           "name": "_GI",
           "type": "uint256",
           "internalType": "uint256"
+        },
+        {
+          "name": "seed",
+          "type": "bytes32",
+          "internalType": "bytes32"
         }
       ],
       "outputs": [
@@ -2478,6 +2483,11 @@
     {
       "type": "error",
       "name": "TA_AmountMustBePositive",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "TA_AuditSeedNotLocked",
       "inputs": []
     },
     {

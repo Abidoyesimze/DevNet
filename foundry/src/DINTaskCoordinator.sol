@@ -158,13 +158,28 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     ///         testnet; VRF or multi-party commit-reveal with a slashable
     ///         non-reveal penalty is the mainnet-grade follow-up.
     uint64 public disputeSeedDelay = 7; // DAO-settable; 1–256 enforced by setDisputeParams
+
+    // ── Ungrindable batch-assignment seed (issue #156 H-2, both tiers) ──────
+    // Same future-block-seed + permissionless-lock pattern as the dispute
+    // seed above, reusing disputeSeedDelay rather than adding a second delay
+    // knob -- one randomness pattern, one sequencer-trust caveat, across the
+    // whole protocol. aggSeed* covers autoCreateTier1AndTier2 (T1+T2);
+    // auditSeed* covers DINTaskAuditor.createAuditorsBatches, anchored here
+    // (at the closeLMsubmissions state transition this contract owns) and
+    // passed across the interface once locked -- the same cross-contract
+    // shape DINTaskAuditor.claimReward already uses for aggregatorWeight.
+    mapping(uint256 => uint64) public aggSeedBlock;
+    mapping(uint256 => bytes32) public aggSeed;
+    mapping(uint256 => uint64) public auditSeedBlock;
+    mapping(uint256 => bytes32) public auditSeed;
+
     uint256 public treasuryAccrued; // cumulative observability counter
     /// @dev Gas units required per validator per GI to cover on-chain submission costs.
     ///      Set by the DAO via setNetworkFeeFloor; not yet enforced at depositRewards
     ///      (enforcement point to be confirmed with Umer — see task_100926_12 #78).
     uint256 public networkFeeFloor;
 
-    /// @notice S2 liveness-fault slash fraction in basis points (0–10000).
+    /// @notice S2 liveness-fault slash fraction in basis points (1–10000).
     ///         Applied to missed-submission slashes (AGG_T*_NO_SUBMISSION) only.
     ///         Bad-consensus faults (AGG_T*_BAD_CONSENSUS) keep a full minStake()
     ///         amount — they imply an active incorrect submission, not a liveness
@@ -223,6 +238,10 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         uint indexed batchId,
         uint64 newSeedBlock
     );
+    event AggSeedLocked(uint indexed GI, bytes32 seed);
+    event AggSeedReanchored(uint indexed GI, uint64 newSeedBlock);
+    event AuditSeedLocked(uint indexed GI, bytes32 seed);
+    event AuditSeedReanchored(uint indexed GI, uint64 newSeedBlock);
 
     modifier onlyCurrentGI(uint _GI) {
         if (_GI != GI) revert TC_WrongGI();
@@ -461,18 +480,29 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     /// @param _GI Current GI index.
     function closeLMsubmissions(uint _GI) public onlyOwner onlyCurrentGI(_GI) {
         if (GIstate != GIstates.LMSstarted) revert TC_LMSubmissionsNotStarted();
+        // Anchor the auditor-batch seed here, at the transition that gates
+        // createAuditorsBatches -- by the time this function could possibly
+        // be called next, the seed block is already fixed but not yet mined,
+        // so the caller (model owner) cannot aim for a favourable outcome.
+        auditSeedBlock[_GI] = uint64(block.number) + disputeSeedDelay;
         _setGIstate(GIstates.LMSclosed);
     }
 
     /// @notice Delegates auditor batch creation to DINTaskAuditor and advances GI state.
     /// @dev Reverts if the auditor contract returns false (e.g. insufficient auditors).
+    ///      Requires auditSeed[_GI] to already be locked via lockAuditSeed
+    ///      (issue #156 H-2) -- the locked seed is passed across the interface
+    ///      so DINTaskAuditor's shuffles are ungrindable without duplicating
+    ///      the seed-anchoring logic in that contract.
     /// @param _GI Current GI index.
     function createAuditorsBatches(
         uint _GI
     ) public onlyOwner onlyCurrentGI(_GI) {
         if (GIstate != GIstates.LMSclosed) revert TC_LMEvalCannotBeStarted();
+        bytes32 seed = auditSeed[_GI];
+        if (seed == bytes32(0)) revert TC_AuditSeedNotLocked();
 
-        bool success = dinTaskAuditorContract.createAuditorsBatches(_GI);
+        bool success = dinTaskAuditorContract.createAuditorsBatches(_GI, seed);
         if (!success) revert TC_FailedToCreateAuditorsBatches();
 
         _setGIstate(GIstates.AuditorsBatchesCreated);
@@ -527,33 +557,44 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
             revert TC_LMEvalCannotBeFinished();
         bool success = dinTaskAuditorContract.finalizeEvaluation(_GI);
         if (!success) revert TC_FailedToFinalizeEvaluation();
+        // Anchor the T1/T2 batch-assignment seed here, at the transition
+        // that gates autoCreateTier1AndTier2 -- same reasoning as
+        // closeLMsubmissions's auditSeedBlock anchor above.
+        aggSeedBlock[_GI] = uint64(block.number) + disputeSeedDelay;
         _setGIstate(GIstates.LMSevaluationClosed);
     }
 
     /// @notice Partitions active aggregators and approved models into Tier-1 batches
     ///         and creates a single Tier-2 batch from the remaining validators.
     /// @dev Aggregators are filtered to those still Active at call time and shuffled
-    ///      using blockhash-based entropy. Reverts if fewer than T1_AGGREGATORS_PER_BATCH
-    ///      active validators remain, or if fewer than T1_MODELS_PER_BATCH models passed.
+    ///      using the locked aggSeed (issue #156 H-2) -- fixed at
+    ///      closeLMsubmissionsEvaluation, before this function could possibly be
+    ///      called, so the caller (model owner) cannot steer batch assignment by
+    ///      choosing when to call this. Reverts if fewer than
+    ///      T1_AGGREGATORS_PER_BATCH active validators remain, or if fewer than
+    ///      T1_MODELS_PER_BATCH models passed, or if the seed isn't locked yet
+    ///      (call lockAggSeed first).
     /// @param _GI Current GI index.
     function autoCreateTier1AndTier2(
         uint _GI
     ) external onlyOwner onlyCurrentGI(_GI) {
         if (GIstate != GIstates.LMSevaluationClosed)
             revert TC_EvalPhaseNotClosed();
+        bytes32 seed = aggSeed[_GI];
+        if (seed == bytes32(0)) revert TC_AggSeedNotLocked();
 
         // Filter the historical registration list down to currently active validators.
         address[] memory valPool = _activeAggregatorPool(_GI);
         uint vLen = valPool.length;
         if (vLen < T1_AGGREGATORS_PER_BATCH) revert TC_NotEnoughValidators();
-        // Seed from the previous block — grinding-resistant enough for T1/T2
-        // batch assignment (no single party controls this call path).
-        // The dispute path uses the stronger future-block seed; see lockDisputeSeed.
-        _shuffleAddressArray(valPool, blockhash(block.number - 1));
+        // Domain-separated derived seeds so the address and index shuffles
+        // don't correlate with each other or with DINTaskAuditor's shuffles
+        // (which derive from the independently-locked auditSeed).
+        _shuffleAddressArray(valPool, keccak256(abi.encodePacked(seed, "AGG_ADDR")));
 
         // ▸ 2. Build list of approved model indexes
         uint[] memory modelIdx = _collectApprovedModelIndexes(_GI);
-        _shuffleUintArray(modelIdx);
+        _shuffleUintArray(modelIdx, keccak256(abi.encodePacked(seed, "AGG_IDX")));
 
         // ▸ 3. Greedily fill Tier-1 batches
         uint vPtr;
@@ -625,11 +666,11 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         }
     }
 
-    function _shuffleUintArray(uint[] memory arr) internal view {
+    function _shuffleUintArray(uint[] memory arr, bytes32 seed) internal pure {
         for (uint i = arr.length - 1; i > 0; i--) {
             uint j = uint(
                 keccak256(
-                    abi.encodePacked(block.timestamp, i, arr.length, msg.sender)
+                    abi.encodePacked(seed, i, arr.length)
                 )
             ) % (i + 1);
             (arr[i], arr[j]) = (arr[j], arr[i]);
@@ -1085,12 +1126,16 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
                 bool submitted = t1Submitted[_GI][b.batchId][aggregator];
                 if (!submitted) {
                     // S2 liveness fault: partial slash + S5/S6 tracking.
-                    uint256 actualSlashed = dinvalidatorStakeContract.slashPartial(
-                        aggregator,
-                        s2Amount,
-                        "AGG_T1_NO_SUBMISSION",
-                        _GI
-                    );
+                    // Skip when rounding reduces s2Amount to 0 — slashPartial
+                    // reverts InvalidSlashAmount on zero, bricking the GI.
+                    uint256 actualSlashed = s2Amount > 0
+                        ? dinvalidatorStakeContract.slashPartial(
+                            aggregator,
+                            s2Amount,
+                            "AGG_T1_NO_SUBMISSION",
+                            _GI
+                        )
+                        : 0;
                     emit AggregatorSlashed(_GI, b.batchId, aggregator, "AGG_T1_NO_SUBMISSION", s2Amount, actualSlashed);
                     // No S6 recordNoParticipation here: slashPartial above already
                     // penalises this missed submission (S2, escalating to S5 on
@@ -1121,12 +1166,15 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
                 bool submitted = t2Submitted[_GI][b.batchId][aggregator];
                 if (!submitted) {
                     // S2 liveness fault: partial slash + S5/S6 tracking.
-                    uint256 actualSlashed = dinvalidatorStakeContract.slashPartial(
-                        aggregator,
-                        s2Amount,
-                        "AGG_T2_NO_SUBMISSION",
-                        _GI
-                    );
+                    // Skip when rounding reduces s2Amount to 0 (same guard as T1).
+                    uint256 actualSlashed = s2Amount > 0
+                        ? dinvalidatorStakeContract.slashPartial(
+                            aggregator,
+                            s2Amount,
+                            "AGG_T2_NO_SUBMISSION",
+                            _GI
+                        )
+                        : 0;
                     emit AggregatorSlashed(_GI, b.batchId, aggregator, "AGG_T2_NO_SUBMISSION", s2Amount, actualSlashed);
                     // No S6 recordNoParticipation here: same rationale as the T1
                     // branch above (S2/S5 already covers this event; avoids
@@ -1264,9 +1312,9 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     /// @dev Only affects AGG_T*_NO_SUBMISSION slashes. BAD_CONSENSUS slashes
     ///      keep the full minStake() amount regardless of this setting.
     ///      Setting to 10000 restores the previous flat-minStake behavior.
-    /// @param bps New fraction in basis points (0–10000).
+    /// @param bps New fraction in basis points (1–10000).
     function setS2SlashFractionBps(uint256 bps) external onlyOwner {
-        if (bps > 10_000) revert TC_InvalidSlashFraction();
+        if (bps == 0 || bps > 10_000) revert TC_InvalidSlashFraction();
         uint256 old = s2SlashFractionBps;
         s2SlashFractionBps = bps;
         emit S2SlashFractionBpsUpdated(old, bps);
@@ -1369,6 +1417,58 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
 
         d.seed = keccak256(abi.encodePacked(bh, _GI, uint8(tierKind), batchId));
         emit DisputeSeedLocked(_GI, tierKind, batchId, d.seed);
+    }
+
+    /// @notice Permissionless: locks the entropy seed for the current GI's
+    ///         Tier-1/Tier-2 batch assignment (issue #156 H-2).
+    /// @dev Same shape as lockDisputeSeed: anyone may call once
+    ///      `block.number > aggSeedBlock[_GI]`; the seed derives from
+    ///      `blockhash(aggSeedBlock[_GI])`, fixed before autoCreateTier1AndTier2
+    ///      could possibly run (anchored in closeLMsubmissionsEvaluation), so
+    ///      the model owner cannot pick a favourable block to call it in.
+    ///      Re-anchors on the same >256-block edge; never locks a zero seed.
+    ///      Trust caveat: as with the dispute seed, this trusts the OP Stack
+    ///      sequencer not to grind `blockhash` -- acceptable for DevNet/
+    ///      testnet, VRF is the mainnet-grade follow-up.
+    function lockAggSeed(uint _GI) external onlyCurrentGI(_GI) {
+        uint64 seedBlock = aggSeedBlock[_GI];
+        if (seedBlock == 0) revert TC_AggSeedNotAnchored();
+        if (aggSeed[_GI] != bytes32(0)) revert TC_AggSeedAlreadyLocked();
+        if (block.number <= seedBlock) revert TC_AggSeedBlockNotMined();
+
+        bytes32 bh = blockhash(seedBlock);
+        if (bh == bytes32(0)) {
+            aggSeedBlock[_GI] = uint64(block.number) + disputeSeedDelay;
+            emit AggSeedReanchored(_GI, aggSeedBlock[_GI]);
+            return;
+        }
+
+        aggSeed[_GI] = keccak256(abi.encodePacked(bh, _GI, "AGG"));
+        emit AggSeedLocked(_GI, aggSeed[_GI]);
+    }
+
+    /// @notice Permissionless: locks the entropy seed for the current GI's
+    ///         auditor batch assignment (issue #156 H-2).
+    /// @dev Mirrors lockAggSeed exactly; anchored in closeLMsubmissions since
+    ///      that's the transition that gates createAuditorsBatches. The
+    ///      locked seed is read by createAuditorsBatches below and passed
+    ///      across the interface to DINTaskAuditor.createAuditorsBatches,
+    ///      which owns the actual shuffle.
+    function lockAuditSeed(uint _GI) external onlyCurrentGI(_GI) {
+        uint64 seedBlock = auditSeedBlock[_GI];
+        if (seedBlock == 0) revert TC_AuditSeedNotAnchored();
+        if (auditSeed[_GI] != bytes32(0)) revert TC_AuditSeedAlreadyLocked();
+        if (block.number <= seedBlock) revert TC_AuditSeedBlockNotMined();
+
+        bytes32 bh = blockhash(seedBlock);
+        if (bh == bytes32(0)) {
+            auditSeedBlock[_GI] = uint64(block.number) + disputeSeedDelay;
+            emit AuditSeedReanchored(_GI, auditSeedBlock[_GI]);
+            return;
+        }
+
+        auditSeed[_GI] = keccak256(abi.encodePacked(bh, _GI, "AUD"));
+        emit AuditSeedLocked(_GI, auditSeed[_GI]);
     }
 
     /// @dev Burns 50% of `amount` and forwards 50% to the platform slash-treasury

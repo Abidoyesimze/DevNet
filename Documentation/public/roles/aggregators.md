@@ -61,6 +61,14 @@ Aggregators operate in two tiers:
 
 ### Tier 1 Aggregation
 
+**Lock the batch-assignment seed (optional, recommended):**
+
+```bash
+dincli aggregator lock-seed <model_id> [--gi <gi_index>]
+```
+
+Between `closeLMsubmissionsEvaluation` and batch creation, the T1/T2 batch assignment is drawn from a seed anchored to a future block. Anyone can lock it once that block is mined. If only the Model Owner locks it, they can decline to lock a draw they dislike and wait ~256 blocks for a fresh one, so locking it yourself as soon as it is available removes that option. The command waits for the seed block, then locks (or skips if someone already has). `show-t1-batches` / `show-t2-batches` do the same automatically when run before batches exist. Only valid while the GI is in `LMSevaluationClosed`.
+
 **View your assigned T1 batches:**
 
 ```bash

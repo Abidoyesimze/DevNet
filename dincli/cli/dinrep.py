@@ -406,7 +406,9 @@ def _sweep_fees_to_router(ctx: typer.Context, contract, name: str, yes: bool):
 
     Both contracts hold collected ETH until the owner sweeps the whole balance to
     DinFeeRouter, which splits it per its ethSplit: the Treasury share is paid out,
-    the other shares accrue in the router (no withdrawal path yet).
+    the other shares accrue in the router (no withdrawal path yet). The router only
+    accepts sources it has authorised (feeSources), so that is checked before the preview
+    instead of surfacing later as an opaque NotFeeSource() revert.
     """
     effective_network, w3, account, console = ctx.obj.get_en_w3_account_console()
 
@@ -437,6 +439,15 @@ def _sweep_fees_to_router(ctx: typer.Context, contract, name: str, yes: bool):
         effective_network,
         fee_router_address,
     )
+    if not fee_router.functions.feeSources(contract.address).call():
+        console.print(
+            f"[bold red]✗ {name} ({contract.address}) is not an authorised fee source on "
+            f"DinFeeRouter {fee_router_address}.[/bold red] foundry/script/DeployPlatform.s.sol "
+            "adds it at deploy time; if it was removed since (removeFeeSource), the DinFeeRouter "
+            f"owner must call addFeeSource({contract.address}) — dincli has no command for this yet."
+        )
+        raise typer.Exit(1)
+
     validator_pool_bps, treasury_bps, storage_bps, _ = fee_router.functions.ethSplit().call()
     treasury_address = fee_router.functions.treasury().call()
 

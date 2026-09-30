@@ -121,7 +121,10 @@ interface IDINTaskCoordinator {
 }
 
 interface IDINTaskAuditor {
-    function createAuditorsBatches(uint _GI) external returns (bool);
+    function createAuditorsBatches(
+        uint _GI,
+        bytes32 seed
+    ) external returns (bool);
 
     function setTestDataAssignedFlag(uint _GI, bool flag) external;
 
@@ -407,6 +410,24 @@ error TC_InvalidSlashFraction();
 error TC_DisputeSeedNotLocked();
 error TC_DisputeSeedBlockNotMined();
 error TC_DisputeSeedAlreadyLocked();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Custom errors — ungrindable batch-assignment seed (issue #156 H-2, both tiers,
+// task_240926_18 Part B). Same future-block-seed pattern as the dispute seed
+// above, applied to the two regular batch-creation call sites.
+// ─────────────────────────────────────────────────────────────────────────────
+error TC_AggSeedNotAnchored();
+error TC_AggSeedBlockNotMined();
+error TC_AggSeedAlreadyLocked();
+error TC_AggSeedNotLocked();
+error TC_AuditSeedNotAnchored();
+error TC_AuditSeedBlockNotMined();
+error TC_AuditSeedAlreadyLocked();
+error TC_AuditSeedNotLocked();
+/// @dev Defense-in-depth: DINTaskAuditor independently rejects a zero seed
+///      even though DINTaskCoordinator already checks auditSeed != 0 before
+///      calling in, mirroring the M-3 precedent (no single point of trust).
+error TA_AuditSeedNotLocked();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Custom errors — commit-then-reveal T1/T2 aggregation (issue #156 M-1,

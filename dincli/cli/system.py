@@ -976,32 +976,26 @@ def din_info(ctx: typer.Context,
 # ---------------------------------------------------------------------------
 # Platform deployments import
 # ---------------------------------------------------------------------------
-# The platform contracts (DinToken, DinCoordinator, DinValidatorStake,
-# DINModelRegistry) are transparent proxies (PR 13). INTERIM bootstrap flow:
-# proxy deployment + initialize + wiring is done by the toolchain script,
-# which runs through the OpenZeppelin upgrades plugin:
+# The platform contracts (DinTreasury, DinToken, DinCoordinator,
+# DinValidatorStake, DINModelRegistry, DinFeeRouter, DinEmission) are
+# transparent proxies. INTERIM bootstrap flow: proxy deployment + initialize +
+# wiring is done by a toolchain script running the OpenZeppelin upgrades
+# validation:
 #
-#     cd hardhat && npx hardhat run scripts/deploy-platform.ts --network <net>
+#     cd foundry && forge script script/DeployPlatform.s.sol --rpc-url <rpc> --broadcast ...   # primary
+#     cd hardhat && npx hardhat run scripts/deploy-platform.ts --network <net>              # secondary
 #
-# That script records the proxy addresses in hardhat/deployments/<net>.json;
-# `dincli system import-deployments` maps that file into din_info.json so all
-# dincli commands resolve the deployed platform.
+# Each script records the proxy addresses in <toolchain>/deployments/<net>.json
+# (same schema); `dincli system import-deployments` maps that file into
+# din_info.json so all dincli commands resolve the deployed platform.
 #
 # NOTE — this is not the target architecture. The decision record
 # Documentation/technical/upgradable-contracts/proxy-deployment-architecture.md
 # chose native web3.py proxy deployment inside `dinrep deploy` (its Option C;
 # backlog: Developer/issues/dincli-native-proxy-deployment.md). Once that
 # lands, this command demotes to a secondary sync utility for script-driven
-# deployments/upgrades and for adopting already-deployed networks.
-#
-# Foundry migration note: foundry/ carries the same contracts but has no
-# deploy scripts yet. Whatever produces the addresses next (forge script for
-# upgrades, native dincli deploys for bootstrap), keep this command as the
-# single import interface — either have the forge script write the same
-# deployments/<network>.json shape (preferred, trivial with vm.writeJson), or
-# extend _DEPLOYMENTS_TO_DIN_INFO parsing with a reader for foundry's
-# broadcast/<Script>.s.sol/<chainid>/run-latest.json. Only the producer of the
-# addresses changes; din_info.json stays the contract with the rest of dincli.
+# deployments/upgrades and for adopting already-deployed networks. Either way
+# din_info.json stays the contract with the rest of dincli.
 
 # dincli network name → deploy-toolchain network name (standalone `npx hardhat
 # node` / anvil are both "localhost"); networks not listed map to themselves.

@@ -150,6 +150,8 @@ contract GasSimulationTest is Test {
         }
         tc.closeLMsubmissions(gi);
 
+        vm.roll(block.number + tc.disputeSeedDelay() + 1); // issue #156 H-2: seed lock
+        tc.lockAuditSeed(gi);
         tc.createAuditorsBatches(gi);
         tc.setTestDataAssignedFlag(gi, true);
         tc.startLMsubmissionsEvaluation(gi);
@@ -181,6 +183,8 @@ contract GasSimulationTest is Test {
             }
         }
         tc.closeLMsubmissionsEvaluation(gi);
+        vm.roll(block.number + tc.disputeSeedDelay() + 1); // issue #156 H-2: seed lock
+        tc.lockAggSeed(gi);
         tc.autoCreateTier1AndTier2(gi);
         tc.startT1Aggregation(gi);
     }
