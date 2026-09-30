@@ -20,7 +20,23 @@ import {DinValidatorStake} from "../src/DinValidatorStake.sol";
 import {DINModelRegistry} from "../src/DINModelRegistry.sol";
 import {DINTaskCoordinator} from "../src/DINTaskCoordinator.sol";
 import {DINTaskAuditor} from "../src/DINTaskAuditor.sol";
-import {GIstates} from "../src/DINShared.sol";
+import {
+    GIstates,
+    TC_AlreadySubmitted,
+    TC_NotReadyToFinalizeT1,
+    TC_NotReadyToFinalizeT2,
+    TC_OnlyOneTier2Batch,
+    TC_T1AlreadyCommitted,
+    TC_T1EmptyCommitHash,
+    TC_T1NoCommitFound,
+    TC_T1RevealHashMismatch,
+    TC_T1RevealPhaseNotOpen,
+    TC_T2AlreadyCommitted,
+    TC_T2EmptyCommitHash,
+    TC_T2NoCommitFound,
+    TC_T2RevealHashMismatch,
+    TC_T2RevealPhaseNotOpen
+} from "../src/DINShared.sol";
 
 contract AggregatorCommitRevealTest is Test {
     DinToken tokenImpl;
@@ -316,7 +332,7 @@ contract AggregatorCommitRevealTest is Test {
         // for the copier's own reveal includes the copier's address, not
         // the honest party's.
         vm.prank(copier);
-        vm.expectRevert(); // TC_T1RevealHashMismatch
+        vm.expectRevert(TC_T1RevealHashMismatch.selector);
         tc.revealT1Aggregation(1, 0, CID_A, TEST_SALT);
     }
 
@@ -329,7 +345,7 @@ contract AggregatorCommitRevealTest is Test {
         // Still in the commit phase (T1AggregationStarted) -- reveal must
         // not be accepted yet, the entire point of the two-phase split.
         vm.prank(t1aggs[0]);
-        vm.expectRevert(); // TC_T1RevealPhaseNotOpen
+        vm.expectRevert(TC_T1RevealPhaseNotOpen.selector);
         tc.revealT1Aggregation(1, 0, CID_A, TEST_SALT);
     }
 
@@ -340,7 +356,7 @@ contract AggregatorCommitRevealTest is Test {
         _openT1RevealPhase();
 
         vm.prank(t1aggs[0]);
-        vm.expectRevert(); // TC_T1NoCommitFound
+        vm.expectRevert(TC_T1NoCommitFound.selector);
         tc.revealT1Aggregation(1, 0, CID_A, TEST_SALT);
     }
 
@@ -352,7 +368,7 @@ contract AggregatorCommitRevealTest is Test {
         _openT1RevealPhase();
 
         vm.prank(t1aggs[0]);
-        vm.expectRevert(); // TC_T1RevealHashMismatch
+        vm.expectRevert(TC_T1RevealHashMismatch.selector);
         tc.revealT1Aggregation(1, 0, CID_B, TEST_SALT);
     }
 
@@ -364,7 +380,7 @@ contract AggregatorCommitRevealTest is Test {
         _openT1RevealPhase();
 
         vm.prank(t1aggs[0]);
-        vm.expectRevert(); // TC_T1RevealHashMismatch
+        vm.expectRevert(TC_T1RevealHashMismatch.selector);
         tc.revealT1Aggregation(1, 0, CID_A, bytes32(uint256(999)));
     }
 
@@ -375,7 +391,7 @@ contract AggregatorCommitRevealTest is Test {
         _commitT1(t1aggs[0], 0, CID_A);
 
         vm.prank(t1aggs[0]);
-        vm.expectRevert(); // TC_T1AlreadyCommitted
+        vm.expectRevert(TC_T1AlreadyCommitted.selector);
         tc.commitT1Aggregation(1, 0, _t1CommitHash(t1aggs[0], CID_B, TEST_SALT, 0));
     }
 
@@ -384,7 +400,7 @@ contract AggregatorCommitRevealTest is Test {
         (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, 0);
 
         vm.prank(t1aggs[0]);
-        vm.expectRevert(); // TC_T1EmptyCommitHash
+        vm.expectRevert(TC_T1EmptyCommitHash.selector);
         tc.commitT1Aggregation(1, 0, bytes32(0));
     }
 
@@ -397,7 +413,7 @@ contract AggregatorCommitRevealTest is Test {
         _revealT1(t1aggs[0], 0, CID_A);
 
         vm.prank(t1aggs[0]);
-        vm.expectRevert(); // TC_AlreadySubmitted
+        vm.expectRevert(TC_AlreadySubmitted.selector);
         tc.revealT1Aggregation(1, 0, CID_A, TEST_SALT);
     }
 
@@ -411,8 +427,152 @@ contract AggregatorCommitRevealTest is Test {
         // Still T1AggregationStarted (commit phase) -- finalize now requires
         // T1AggregationRevealStarted.
         vm.prank(modelOwner);
-        vm.expectRevert(); // TC_NotReadyToFinalizeT1
+        vm.expectRevert(TC_NotReadyToFinalizeT1.selector);
         tc.finalizeT1Aggregation(1);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // T2 negative paths -- same guards as T1 above, plus T2's single-batch
+    // (batchId == 0) check. The T1 fixture's other 3 aggregators form the
+    // T2 batch.
+    // ─────────────────────────────────────────────────────────────────────
+
+    function _t2CommitHash(address who, bytes32 cid, bytes32 salt) internal pure returns (bytes32) {
+        return keccak256(abi.encode(cid, salt, who, uint(1), DINTaskCoordinator.TierKind.Tier2, uint(0)));
+    }
+
+    function _commitT2(address who, bytes32 cid) internal {
+        vm.prank(who);
+        tc.commitT2Aggregation(1, 0, _t2CommitHash(who, cid, TEST_SALT));
+    }
+
+    function _revealT2(address who, bytes32 cid) internal {
+        vm.prank(who);
+        tc.revealT2Aggregation(1, 0, cid, TEST_SALT);
+    }
+
+    function _openT2RevealPhase() internal {
+        vm.prank(modelOwner);
+        tc.startT2AggregationReveal(1);
+    }
+
+    /// @dev Runs T1 to T1AggregationDone (all 3 commit + reveal CID_A), then
+    ///      opens the T2 commit window. Returns the T2 batch's aggregators.
+    function _runToT2AggregationStarted() internal returns (address[] memory t2aggs) {
+        _runToT1AggregationStarted();
+        (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, 0);
+        for (uint i = 0; i < t1aggs.length; i++) _commitT1(t1aggs[i], 0, CID_A);
+        _openT1RevealPhase();
+        for (uint i = 0; i < t1aggs.length; i++) _revealT1(t1aggs[i], 0, CID_A);
+
+        vm.startPrank(modelOwner);
+        tc.finalizeT1Aggregation(1);
+        tc.startT2Aggregation(1);
+        vm.stopPrank();
+
+        (, t2aggs, , ) = tc.getTier2Batch(1, 0);
+    }
+
+    function test_t2_copyAttack_replayingPeerCommitHash_cannotReveal() public {
+        address[] memory t2aggs = _runToT2AggregationStarted();
+        bytes32 honestCommitHash = _t2CommitHash(t2aggs[0], CID_B, TEST_SALT);
+
+        vm.prank(t2aggs[0]);
+        tc.commitT2Aggregation(1, 0, honestCommitHash);
+        vm.prank(t2aggs[1]);
+        tc.commitT2Aggregation(1, 0, honestCommitHash);
+
+        _openT2RevealPhase();
+        _revealT2(t2aggs[0], CID_B);
+
+        vm.prank(t2aggs[1]);
+        vm.expectRevert(TC_T2RevealHashMismatch.selector);
+        tc.revealT2Aggregation(1, 0, CID_B, TEST_SALT);
+    }
+
+    function test_t2_reveal_beforeRevealPhase_reverts() public {
+        address[] memory t2aggs = _runToT2AggregationStarted();
+        _commitT2(t2aggs[0], CID_B);
+
+        vm.prank(t2aggs[0]);
+        vm.expectRevert(TC_T2RevealPhaseNotOpen.selector);
+        tc.revealT2Aggregation(1, 0, CID_B, TEST_SALT);
+    }
+
+    function test_t2_reveal_withoutPriorCommit_reverts() public {
+        address[] memory t2aggs = _runToT2AggregationStarted();
+        _openT2RevealPhase();
+
+        vm.prank(t2aggs[0]);
+        vm.expectRevert(TC_T2NoCommitFound.selector);
+        tc.revealT2Aggregation(1, 0, CID_B, TEST_SALT);
+    }
+
+    function test_t2_reveal_wrongCIDOrSalt_reverts() public {
+        address[] memory t2aggs = _runToT2AggregationStarted();
+        _commitT2(t2aggs[0], CID_B);
+        _openT2RevealPhase();
+
+        vm.prank(t2aggs[0]);
+        vm.expectRevert(TC_T2RevealHashMismatch.selector);
+        tc.revealT2Aggregation(1, 0, CID_A, TEST_SALT);
+
+        vm.prank(t2aggs[0]);
+        vm.expectRevert(TC_T2RevealHashMismatch.selector);
+        tc.revealT2Aggregation(1, 0, CID_B, bytes32(uint256(999)));
+    }
+
+    function test_t2_commit_twiceReverts() public {
+        address[] memory t2aggs = _runToT2AggregationStarted();
+        _commitT2(t2aggs[0], CID_B);
+
+        vm.prank(t2aggs[0]);
+        vm.expectRevert(TC_T2AlreadyCommitted.selector);
+        tc.commitT2Aggregation(1, 0, _t2CommitHash(t2aggs[0], CID_A, TEST_SALT));
+    }
+
+    function test_t2_commit_zeroHashReverts() public {
+        address[] memory t2aggs = _runToT2AggregationStarted();
+
+        vm.prank(t2aggs[0]);
+        vm.expectRevert(TC_T2EmptyCommitHash.selector);
+        tc.commitT2Aggregation(1, 0, bytes32(0));
+    }
+
+    function test_t2_reveal_twiceReverts() public {
+        address[] memory t2aggs = _runToT2AggregationStarted();
+        _commitT2(t2aggs[0], CID_B);
+        _openT2RevealPhase();
+        _revealT2(t2aggs[0], CID_B);
+
+        vm.prank(t2aggs[0]);
+        vm.expectRevert(TC_AlreadySubmitted.selector);
+        tc.revealT2Aggregation(1, 0, CID_B, TEST_SALT);
+    }
+
+    function test_t2_finalize_beforeRevealStarted_reverts() public {
+        address[] memory t2aggs = _runToT2AggregationStarted();
+        _commitT2(t2aggs[0], CID_B);
+        _commitT2(t2aggs[1], CID_B);
+
+        vm.prank(modelOwner);
+        vm.expectRevert(TC_NotReadyToFinalizeT2.selector);
+        tc.finalizeT2Aggregation(1);
+    }
+
+    function test_t2_nonZeroBatchId_reverts() public {
+        address[] memory t2aggs = _runToT2AggregationStarted();
+
+        vm.prank(t2aggs[0]);
+        vm.expectRevert(TC_OnlyOneTier2Batch.selector);
+        tc.commitT2Aggregation(1, 1, _t2CommitHash(t2aggs[0], CID_B, TEST_SALT));
+
+        _commitT2(t2aggs[0], CID_B);
+        _openT2RevealPhase();
+
+        vm.prank(t2aggs[0]);
+        vm.expectRevert(TC_OnlyOneTier2Batch.selector);
+        tc.revealT2Aggregation(1, 1, CID_B, TEST_SALT);
     }
 
     /// @dev A committed-but-never-revealed aggregator must be excluded from

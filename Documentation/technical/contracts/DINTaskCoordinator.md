@@ -57,9 +57,11 @@ The contract is owned by the model owner (via `Ownable`) and delegates auditor o
 |----------|------|-------------|
 | `tier1Batches` | `mapping(uint => Tier1Batch[])` | T1 batches per GI |
 | `isTier1Aggregator` | `mapping(uint => mapping(uint => mapping(address => bool)))` | GI → batchId → address → assigned |
-| `t1SubmissionCID` | `mapping(uint => mapping(uint => mapping(address => bytes32)))` | Submitted CID per aggregator |
-| `t1Submitted` | `mapping(uint => mapping(uint => mapping(address => bool)))` | Submission flag |
-| `t1Votes` | `mapping(uint => mapping(uint => mapping(bytes32 => uint)))` | Vote count per CID |
+| `t1SubmissionCID` | `mapping(uint => mapping(uint => mapping(address => bytes32)))` | Revealed CID per aggregator (written only by `revealT1Aggregation`) |
+| `t1Submitted` | `mapping(uint => mapping(uint => mapping(address => bool)))` | Revealed flag; `false` for a committed-but-unrevealed aggregator |
+| `t1Votes` | `mapping(uint => mapping(uint => mapping(bytes32 => uint)))` | Vote count per revealed CID |
+| `t1CommitHash` | `mapping(uint => mapping(uint => mapping(address => bytes32)))` | Commit hash stored by `commitT1Aggregation` (§7.4) |
+| `t1Committed` | `mapping(uint => mapping(uint => mapping(address => bool)))` | Commit flag |
 
 ### 3.4 Tier-2 Batch State
 
@@ -67,9 +69,11 @@ The contract is owned by the model owner (via `Ownable`) and delegates auditor o
 |----------|------|-------------|
 | `tier2Batches` | `mapping(uint => Tier2Batch[])` | T2 batches per GI (always exactly 1) |
 | `isTier2Aggregator` | `mapping(uint => mapping(uint => mapping(address => bool)))` | Assignment check |
-| `t2SubmissionCID` | `mapping(uint => mapping(uint => mapping(address => bytes32)))` | Submitted CID |
-| `t2Submitted` | `mapping(uint => mapping(uint => mapping(address => bool)))` | Submission flag |
-| `t2Votes` | `mapping(uint => mapping(uint => mapping(bytes32 => uint)))` | Vote count per CID |
+| `t2SubmissionCID` | `mapping(uint => mapping(uint => mapping(address => bytes32)))` | Revealed CID (written only by `revealT2Aggregation`) |
+| `t2Submitted` | `mapping(uint => mapping(uint => mapping(address => bool)))` | Revealed flag |
+| `t2Votes` | `mapping(uint => mapping(uint => mapping(bytes32 => uint)))` | Vote count per revealed CID |
+| `t2CommitHash` | `mapping(uint => mapping(uint => mapping(address => bytes32)))` | Commit hash stored by `commitT2Aggregation` (§7.5) |
+| `t2Committed` | `mapping(uint => mapping(uint => mapping(address => bool)))` | Commit flag |
 | `tier2Score` | `mapping(uint => uint)` | Final score recorded for a GI's T2 output |
 
 ---
@@ -130,9 +134,11 @@ Ownable (model owner)
   ├── startLMsubmissionsEvaluationReveal()     // closes commit, opens reveal phase
   ├── closeLMsubmissionsEvaluation()
   ├── autoCreateTier1AndTier2()
-  ├── startT1Aggregation()
+  ├── startT1Aggregation()                    // opens T1 commit phase
+  ├── startT1AggregationReveal()              // closes T1 commit, opens reveal phase
   ├── finalizeT1Aggregation()
-  ├── startT2Aggregation()
+  ├── startT2Aggregation()                    // opens T2 commit phase
+  ├── startT2AggregationReveal()              // closes T2 commit, opens reveal phase
   ├── finalizeT2Aggregation()
   ├── slashAuditors()
   ├── slashAggregators()
@@ -141,8 +147,10 @@ Ownable (model owner)
 
 Permissionless (with batch/GI guards)
   ├── registerDINaggregator()
-  ├── submitT1Aggregation()
-  └── submitT2Aggregation()
+  ├── commitT1Aggregation()
+  ├── revealT1Aggregation()
+  ├── commitT2Aggregation()
+  └── revealT2Aggregation()
 ```
 
 ---
@@ -244,20 +252,38 @@ Called after LM evaluation closes (`LMSevaluationClosed`). Reverts with `TC_AggS
 
 ### 7.4 T1 Aggregation
 
-**Submit:**
+T1 submissions are commit-then-reveal (issue #156 M-1): a single-shot submit let a late aggregator read an earlier aggregator's `t1SubmissionCID` from public state and copy it. Nothing is counted until the model owner closes the commit window, so no CID is visible while commits are open.
+
+**Phase 1: commit** (state `T1AggregationStarted`)
 ```solidity
-function submitT1Aggregation(uint _GI, uint _batchId, bytes32 _aggregationCID) external
+function commitT1Aggregation(uint _GI, uint _batchId, bytes32 commitHash) external
 ```
-- Validates sender is assigned T1 aggregator for the batch (`TC_NotBatchAggregator`).
-- Validates sender is still `isValidatorActive` (`TC_AggregatorNotActive`).
-- One submission per aggregator (`TC_AlreadySubmitted`).
-- Tallies votes: `t1Votes[_GI][_batchId][_aggregationCID]++`.
+- Validates the batch exists (`TC_InvalidBatch`), sender is its assigned T1 aggregator (`TC_NotBatchAggregator`) and still `isValidatorActive` (`TC_AggregatorNotActive`).
+- Rejects a zero hash (`TC_T1EmptyCommitHash`) and a second commit (`TC_T1AlreadyCommitted`).
+- Stores `t1CommitHash`/`t1Committed`; emits `T1AggregationCommitted`.
+- `commitHash = keccak256(abi.encode(cid, salt, msg.sender, GI, TierKind.Tier1, batchId))`. Binding `msg.sender` (and GI/tier/batch) means an aggregator who copies a peer's commit hash cannot later reveal the peer's `(cid, salt)` under their own address; the recomputed hash won't match.
+
+**Open reveals** (owner):
+```solidity
+function startT1AggregationReveal(uint _GI) external onlyOwner
+```
+Requires `T1AggregationStarted` (`TC_T1RevealCannotBeStarted`); sets `GIstate = T1AggregationRevealStarted`. No further commits are accepted.
+
+**Phase 2: reveal** (state `T1AggregationRevealStarted`)
+```solidity
+function revealT1Aggregation(uint _GI, uint _batchId, bytes32 _aggregationCID, bytes32 salt) external
+```
+- Wrong state reverts `TC_T1RevealPhaseNotOpen`; same batch/assignment/active checks as commit.
+- Requires a prior commit (`TC_T1NoCommitFound`), no prior reveal (`TC_AlreadySubmitted`), a non-zero CID (`TC_ZeroCID`), and a matching hash (`TC_T1RevealHashMismatch`).
+- Writes `t1Submitted`/`t1SubmissionCID`, tallies `t1Votes[_GI][_batchId][_aggregationCID]++`, emits `T1AggregationSubmitted`.
+
+An aggregator who commits but never reveals never sets `t1Submitted`, so they are excluded from finalization and slashed as a non-submitter in §8.2.
 
 **Finalize:**
 ```solidity
 function finalizeT1Aggregation(uint _GI) external onlyOwner
 ```
-For each T1 batch, determines the winning CID by plurality (most votes):
+Requires `T1AggregationRevealStarted` (`TC_NotReadyToFinalizeT1`). For each T1 batch, determines the winning CID by plurality (most votes):
 ```
 For each aggregator in batch:
     if submitted:
@@ -276,7 +302,7 @@ Sets `GIstate = T1AggregationDone`.
 
 ### 7.5 T2 Aggregation
 
-Identical pattern to T1 (including the `isValidatorActive` check on submit) but operates on `tier2Batches`. Only one batch exists (batchId = 0). Sets `GIstate = T2AggregationDone`.
+Same commit-then-reveal pattern as T1 (§7.4) on `tier2Batches`: `commitT2Aggregation` in `T2AggregationStarted`, owner `startT2AggregationReveal` → `T2AggregationRevealStarted`, then `revealT2Aggregation`, with the `TC_T2*` counterparts of the T1 errors and events. The commit hash uses `TierKind.Tier2`. Only one batch exists: any `_batchId != 0` reverts `TC_OnlyOneTier2Batch`. `finalizeT2Aggregation` requires `T2AggregationRevealStarted` (`TC_NotReadyToFinalizeT2`) and sets `GIstate = T2AggregationDone`.
 
 ---
 
@@ -319,7 +345,7 @@ For each T2 batch:
 ```
 
 **Slash condition:** An aggregator is slashed if they either:
-- Did not submit any CID (`AGG_T1_NO_SUBMISSION` / `AGG_T2_NO_SUBMISSION`), OR
+- Did not reveal any CID (`AGG_T1_NO_SUBMISSION` / `AGG_T2_NO_SUBMISSION`). This covers both never committing and committing without revealing; the two aren't distinguished (see §15), OR
 - Submitted a CID that did not match the winning (plurality) CID (`AGG_T1_BAD_CONSENSUS` / `AGG_T2_BAD_CONSENSUS`).
 
 **Slash amount:** `dinvalidatorStakeContract.minStake()` at call time — fetched live from the stake contract, not a value stored on `DINTaskCoordinator`. `IDinValidatorStake.slash()` returns the amount actually deducted, which is recorded in the `AggregatorSlashed` event alongside the requested amount (they can differ, e.g. if the aggregator's remaining stake is below `slashAmount`).
@@ -384,6 +410,8 @@ Both use Fisher-Yates algorithm. `aggSeed[_GI]` / `auditSeed[_GI]` (§11.1) repl
 | `DINValidatorRegistered(GI, validator)` | Aggregator registers |
 | `Tier1BatchAuto(GI, batchId)` | T1 batch created |
 | `Tier2BatchAuto(GI, batchId)` | T2 batch created |
+| `T1AggregationCommitted(GI, batchId, aggregator, commitHash)` / `T2AggregationCommitted(...)` | Aggregator commits (§7.4 / §7.5) |
+| `T1AggregationSubmitted(GI, batchId, aggregator, cid)` / `T2AggregationSubmitted(...)` | Aggregator reveals; the CID is counted |
 | `AggregatorSlashed(GI, batchId, aggregator, reason, requested, actual)` | Aggregator slashed in `slashAggregators` (T1 or T2) |
 | `AggSeedLocked(GI, seed)` | `lockAggSeed` locks the T1/T2 batch-assignment seed |
 | `AggSeedReanchored(GI, newSeedBlock)` | `lockAggSeed` re-anchors after the 256-block `blockhash` window is missed |
@@ -400,6 +428,7 @@ Both use Fisher-Yates algorithm. `aggSeed[_GI]` / `auditSeed[_GI]` (§11.1) repl
 | Wrong GI operations | `onlyCurrentGI` modifier on most functions |
 | Weak PRNG for batch assignment | **Fixed** (issue #156 H-2, task_240926_18 Part B): `blockhash(block.number - 1)`/`block.timestamp` replaced by the locked, future-block `aggSeed`/`auditSeed` (§11.1). Residual: sequencer trust, a re-roll available to a model owner who declines to lock, and post-lock pool reshaping via unstaking — see §11.1's residual list. VRF remains the mainnet-grade follow-up (issue #178) |
 | Auditor slashing | Implemented on `DINTaskAuditor` (S1 always active, S3 shadow-mode by default) and triggered here via delegation — see `DINTaskAuditor.md` §10 |
+| Late aggregator copies an earlier aggregator's CID | **Fixed** (issue #156 M-1, task_240926_18 Part C): commit-then-reveal with a sender-bound commit hash (§7.4). CIDs become visible only after the commit window closes, and a copied commit hash can't be revealed under another address |
 | Aggregator collusion (submit same wrong CID) | Plurality voting means 2-of-3 colluding aggregators win; no quorum threshold — design risk |
 | No slash appeal mechanism | Slashed aggregators cannot challenge the decision on-chain |
 | Aggregator/auditor activity checks depend on `DinValidatorStake` | Both registration and per-round submissions re-check `isValidatorActive` live; an address deactivated mid-GI is excluded from the *next* active-pool filter (batch formation) but a submission already made before deactivation still counts |
@@ -430,4 +459,6 @@ DINTaskCoordinator
 - No on-chain reward distribution to aggregators — the T2 score is informational only.
 - No mechanism to recover from a stalled GI (e.g., if T1 never reaches submissions).
 - T2 always produces exactly one batch; no fallback if insufficient aggregators remain after T1 assignment.
+- Commit-then-reveal T1/T2 aggregation adds two more owner-driven steps (`startT1AggregationReveal`, `startT2AggregationReveal`); forgetting one stalls the GI in the commit window (finalize reverts) without corrupting state.
+- Selective non-reveal: reveals land sequentially, so a committed aggregator who sees peers' CIDs diverge from their own can withhold the reveal and take the no-submission slash instead of the bad-consensus slash. Same trade-off exists on the auditor side; tracked in issue #201 Part B.
 - The commit-then-reveal evaluation phase (`LMSevaluationStarted` → `LMSevaluationRevealStarted` → `LMSevaluationClosed`) adds an explicit owner-driven step (`startLMsubmissionsEvaluationReveal`) between commit and reveal; forgetting to call it simply stalls the GI (no reveal is accepted) rather than corrupting any state, but it is one more manual step in the model-owner workflow than the pre-commit-reveal design had.

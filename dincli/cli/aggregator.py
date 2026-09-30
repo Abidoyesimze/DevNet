@@ -314,7 +314,14 @@ def aggregate_t1(
         if account.address not in val:
             continue
 
-        found_batch = True   
+        found_batch = True
+
+        # A retry must never replace the salt behind an existing on-chain
+        # commitment -- the reveal would then fail TC_T1RevealHashMismatch and
+        # the aggregator be S2-slashed. Skip before re-aggregating.
+        if submit and taskCoordinator_contract.functions.t1Committed(curr_GI, bid, account.address).call():
+            console.print(f"[yellow]T1 batch {bid} already committed by {account.address}; skipping (reveal with `dincli aggregator reveal-t1`).[/yellow]")
+            continue
 
         model_cids = []
         for j in range(len(idxs)):
@@ -410,6 +417,12 @@ def aggregate_t1(
                 commit_hash = _agg_commit_hash(aggregated_cid_bytes32, salt, account.address, curr_GI, TIER1, bid)
                 time.sleep(2)
 
+                # Cache before sending: build_and_send_tx returns None both on a
+                # revert and when the receipt wait fails for a tx that may still
+                # mine, so saving only on a receipt could strand a real commit
+                # without its preimage. A failed attempt leaves a stale cache
+                # that the next retry replaces (the batch isn't committed yet).
+                _save_agg_commit(model_base_dir, TIER1, curr_GI, bid, aggregated_cid_bytes32, salt)
                 build_and_send_tx(
                     ctx,
                     taskCoordinator_contract.functions.commitT1Aggregation(curr_GI, bid, commit_hash),
@@ -418,9 +431,6 @@ def aggregate_t1(
                     "Could not commit aggregation CID.",
                     exit_on_failure=False
                 )
-                # Only cache locally once the commit tx is known to have been
-                # attempted -- reveal is a no-op without this file.
-                _save_agg_commit(model_base_dir, TIER1, curr_GI, bid, aggregated_cid_bytes32, salt)
             except Exception as e:
                 console.print(f"[bold red]✗ Could not commit aggregation CID. Error: {e}[/bold red]")
                 raise typer.Exit(1)
@@ -517,9 +527,16 @@ def aggregate_t2(
         if account.address not in aggregators:
             continue
         
+        # Same retry guard as aggregate-t1: never replace the salt behind an
+        # existing on-chain commitment.
+        if submit and taskCoordinator_contract.functions.t2Committed(curr_GI, i, account.address).call():
+            found_batch = True
+            console.print(f"[yellow]T2 batch {i} already committed by {account.address}; skipping (reveal with `dincli aggregator reveal-t2`).[/yellow]")
+            continue
+
         console.print(f"Aggregating T2 batch {bid} for aggregator {account.address}")
-        
-        found_batch = True      
+
+        found_batch = True
 
         model_cids = []
 
@@ -614,6 +631,8 @@ def aggregate_t2(
                 salt = secrets.token_bytes(32)
                 commit_hash = _agg_commit_hash(aggregated_cid_bytes32, salt, account.address, curr_GI, TIER2, i)
 
+                # Cache before sending -- see aggregate-t1.
+                _save_agg_commit(model_base_dir, TIER2, curr_GI, i, aggregated_cid_bytes32, salt)
                 build_and_send_tx(
                     ctx,
                     taskCoordinator_contract.functions.commitT2Aggregation(curr_GI, i, commit_hash),
@@ -622,7 +641,6 @@ def aggregate_t2(
                     "Could not commit aggregation CID.",
                     exit_on_failure=False
                 )
-                _save_agg_commit(model_base_dir, TIER2, curr_GI, i, aggregated_cid_bytes32, salt)
             except Exception as e:
                 console.print(f"[bold red]✗ Could not commit aggregation CID. Error: {e}[/bold red]")
                 raise typer.Exit(1)
