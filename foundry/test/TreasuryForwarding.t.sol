@@ -205,13 +205,26 @@ contract TreasuryForwardingTest is Test {
         tc.startT1Aggregation(1);
         vm.stopPrank();
 
-        // Submit for every T1 batch so finalizeT1Aggregation doesn't revert.
+        // Commit+reveal for every T1 batch so finalizeT1Aggregation doesn't revert.
         uint256 t1Count = tc.tier1BatchCount(1);
+        bytes32 t1cid = bytes32(uint256(0xC1D));
+        for (uint b = 0; b < t1Count; b++) {
+            (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, b);
+            for (uint i = 0; i < t1aggs.length; i++) {
+                bytes32 commitHash = keccak256(
+                    abi.encode(t1cid, TEST_SALT, t1aggs[i], uint(1), DINTaskCoordinator.TierKind.Tier1, b)
+                );
+                vm.prank(t1aggs[i]);
+                tc.commitT1Aggregation(1, b, commitHash);
+            }
+        }
+        vm.prank(modelOwner);
+        tc.startT1AggregationReveal(1);
         for (uint b = 0; b < t1Count; b++) {
             (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, b);
             for (uint i = 0; i < t1aggs.length; i++) {
                 vm.prank(t1aggs[i]);
-                tc.submitT1Aggregation(1, b, bytes32(uint256(0xC1D)));
+                tc.revealT1Aggregation(1, b, t1cid, TEST_SALT);
             }
         }
 
@@ -220,13 +233,26 @@ contract TreasuryForwardingTest is Test {
         tc.startT2Aggregation(1);
         vm.stopPrank();
 
-        // Submit T2 aggregation if a T2 batch was created (6-agg case).
+        // Commit+reveal T2 aggregation if a T2 batch was created (6-agg case).
+        bytes32 t2cid = bytes32(uint256(0xC2D));
         try tc.getTier2Batch(1, 0) returns (uint, address[] memory t2aggs, bool, bytes32) {
             for (uint i = 0; i < t2aggs.length; i++) {
+                bytes32 commitHash = keccak256(
+                    abi.encode(t2cid, TEST_SALT, t2aggs[i], uint(1), DINTaskCoordinator.TierKind.Tier2, uint(0))
+                );
                 vm.prank(t2aggs[i]);
-                tc.submitT2Aggregation(1, 0, bytes32(uint256(0xC2D)));
+                tc.commitT2Aggregation(1, 0, commitHash);
             }
-        } catch {}
+            vm.prank(modelOwner);
+            tc.startT2AggregationReveal(1);
+            for (uint i = 0; i < t2aggs.length; i++) {
+                vm.prank(t2aggs[i]);
+                tc.revealT2Aggregation(1, 0, t2cid, TEST_SALT);
+            }
+        } catch {
+            vm.prank(modelOwner);
+            tc.startT2AggregationReveal(1);
+        }
 
         vm.startPrank(modelOwner);
         tc.finalizeT2Aggregation(1);

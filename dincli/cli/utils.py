@@ -656,13 +656,14 @@ stateDescription = [
         "LM submissions evaluation closed",
         "T1nT2B created",
         "T1B aggregation started",
+        "T1B aggregation reveal started",
         "T1B aggregation done",
         "T2B aggregation started",
+        "T2B aggregation reveal started",
         "T2B aggregation done",
         "Auditors slashed",
         "Validators slashed",
         "GI ended",
-        "LM submissions evaluation reveal started"
     ]
 
 states = [
@@ -684,20 +685,24 @@ states = [
         "LMSevaluationClosed",
         "T1nT2Bcreated",
         "T1AggregationStarted",
+        # issue #156 M-1 (task_240926_18 Part C): inserted in lifecycle
+        # position, same 2026-08-27 precedent LMSevaluationRevealStarted
+        # above set -- this list is a positional mirror of DINShared.sol's
+        # GIstates enum, and that enum's own comment explains why insertion
+        # (not appending) is required to keep this mirror in sync. A stale
+        # duplicate append of LMSevaluationRevealStarted previously sat at
+        # the end of this list from before that precedent was applied here;
+        # removed as part of this same fix.
+        "T1AggregationRevealStarted",
         "T1AggregationDone",
         "T2AggregationStarted",
+        "T2AggregationRevealStarted",
         "T2AggregationDone",
         "AuditorsSlashed",
         "AggregatorsSlashed",
         "GIended",
-        # Appended, not inserted where it chronologically belongs (between
-        # LMSevaluationStarted and LMSevaluationClosed) -- this list is a
-        # positional mirror of DINShared.sol's GIstates enum, which appends
-        # this member for the same reason (see the enum's own comment).
-        # Inserting here would desync every state index below GIended.
-        "LMSevaluationRevealStarted"
     ]
-    
+
 
 GIstate_to_index = {state: idx for idx, state in enumerate(states)}  
 

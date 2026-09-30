@@ -176,7 +176,19 @@ contract DisputeResolutionTest is Test {
         tc.lockAggSeed(gi);
     }
 
-    function _runToT1Finalized(uint256 numAggregators) internal {
+    /// @dev Shared setup for _runToT1Finalized/_runToT1FinalizedWithDissent
+    ///      below -- both drove an identical path (deploy, register, LMS,
+    ///      evaluation commit/reveal, T1 commit window open) up to the point
+    ///      where they diverge on which CID(s) the T1 aggregators reveal.
+    ///      Factored out rather than duplicated in both, which is what
+    ///      caused a solc via_ir ICE ("Tag too large for reserved space")
+    ///      once this file's total complexity grew past its previous
+    ///      threshold (same class of fix as _lockAuditSeedNow/
+    ///      _lockAggSeedNow/_commitAndRevealT1 above, just one level up).
+    function _setupToT1AggregationStarted(
+        uint256 numAggregators,
+        string memory aggPrefix
+    ) internal returns (address[] memory aggs) {
         _deployPlatform();
         _deployTaskPair();
 
@@ -184,9 +196,9 @@ contract DisputeResolutionTest is Test {
         _fundAndStake(auditor2);
         _fundAndStake(auditor3);
 
-        address[] memory aggs = new address[](numAggregators);
+        aggs = new address[](numAggregators);
         for (uint i = 0; i < numAggregators; i++) {
-            aggs[i] = makeAddr(string(abi.encodePacked("agg", i)));
+            aggs[i] = makeAddr(string(abi.encodePacked(aggPrefix, i)));
             _fundAndStake(aggs[i]);
         }
 
@@ -257,15 +269,71 @@ contract DisputeResolutionTest is Test {
         tc.autoCreateTier1AndTier2(1);
         tc.startT1Aggregation(1);
         vm.stopPrank();
+    }
+
+    function _runToT1Finalized(uint256 numAggregators) internal {
+        _setupToT1AggregationStarted(numAggregators, "agg");
 
         (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, 0);
-        for (uint i = 0; i < t1aggs.length; i++) {
-            vm.prank(t1aggs[i]);
-            tc.submitT1Aggregation(1, 0, WINNING_CID);
-        }
+        _commitAndRevealT1(t1aggs, 1, 0, WINNING_CID);
 
         vm.prank(modelOwner);
         tc.finalizeT1Aggregation(1);
+    }
+
+    /// @dev issue #156 M-1: commits each of `aggs` to `cid` for T1 batch
+    ///      `batchId`, opens the reveal window, then reveals every commit.
+    ///      Small helper (not inlined at each call site) so fixtures like
+    ///      _runToT1Finalized below stay small -- the same reasoning as
+    ///      _lockAuditSeedNow/_lockAggSeedNow just above avoided a solc
+    ///      via_ir ICE in this file previously.
+    function _commitAndRevealT1(
+        address[] memory aggs,
+        uint gi,
+        uint batchId,
+        bytes32 cid
+    ) internal {
+        for (uint i = 0; i < aggs.length; i++) {
+            bytes32 commitHash = keccak256(
+                abi.encode(cid, TEST_SALT, aggs[i], gi, DINTaskCoordinator.TierKind.Tier1, batchId)
+            );
+            vm.prank(aggs[i]);
+            tc.commitT1Aggregation(gi, batchId, commitHash);
+        }
+
+        vm.prank(modelOwner);
+        tc.startT1AggregationReveal(gi);
+
+        for (uint i = 0; i < aggs.length; i++) {
+            vm.prank(aggs[i]);
+            tc.revealT1Aggregation(gi, batchId, cid, TEST_SALT);
+        }
+    }
+
+    /// @dev Same as `_commitAndRevealT1`, but each aggregator can reveal a
+    ///      different CID (per-aggregator dissent) -- `cids[i]` must line up
+    ///      with `aggs[i]`.
+    function _commitAndRevealT1Dissenting(
+        address[] memory aggs,
+        uint gi,
+        uint batchId,
+        bytes32[] memory cids
+    ) internal {
+        for (uint i = 0; i < aggs.length; i++) {
+            bytes32 commitHash = keccak256(
+                abi.encode(cids[i], TEST_SALT, aggs[i], gi, DINTaskCoordinator.TierKind.Tier1, batchId)
+            );
+            vm.prank(aggs[i]);
+            tc.commitT1Aggregation(gi, batchId, commitHash);
+        }
+
+        vm.prank(modelOwner);
+        tc.startT1AggregationReveal(gi);
+
+        for (uint i = 0; i < aggs.length; i++) {
+            vm.prank(aggs[i]);
+            tc.revealT1Aggregation(gi, batchId, cids[i], TEST_SALT);
+        }
     }
 
     /// @dev Same as `_runToT1Finalized`, except one of the disputed batch's
@@ -278,98 +346,19 @@ contract DisputeResolutionTest is Test {
     function _runToT1FinalizedWithDissent(
         uint256 numAggregators
     ) internal returns (address dissenter) {
-        _deployPlatform();
-        _deployTaskPair();
-
-        _fundAndStake(auditor1);
-        _fundAndStake(auditor2);
-        _fundAndStake(auditor3);
-
-        address[] memory aggs = new address[](numAggregators);
-        for (uint i = 0; i < numAggregators; i++) {
-            aggs[i] = makeAddr(string(abi.encodePacked("dissentAgg", i)));
-            _fundAndStake(aggs[i]);
-        }
-
-        vm.prank(modelOwner);
-        tc.startDINaggregatorsRegistration(1);
-        for (uint i = 0; i < numAggregators; i++) {
-            vm.prank(aggs[i]);
-            tc.registerDINaggregator(1);
-        }
-
-        vm.startPrank(modelOwner);
-        tc.closeDINaggregatorsRegistration(1);
-        tc.startDINauditorsRegistration(1);
-        vm.stopPrank();
-
-        vm.prank(auditor1);
-        ta.registerDINAuditor(1);
-        vm.prank(auditor2);
-        ta.registerDINAuditor(1);
-        vm.prank(auditor3);
-        ta.registerDINAuditor(1);
-
-        vm.startPrank(modelOwner);
-        tc.closeDINauditorsRegistration(1);
-        tc.startLMsubmissions(1);
-        vm.stopPrank();
-
-        vm.prank(client1);
-        ta.submitLocalModel(bytes32(uint256(100)), 1);
-        vm.prank(client2);
-        ta.submitLocalModel(bytes32(uint256(200)), 1);
-        vm.prank(client3);
-        ta.submitLocalModel(bytes32(uint256(300)), 1);
-
-        vm.startPrank(modelOwner);
-        tc.closeLMsubmissions(1);
-        _lockAuditSeedNow(1); // issue #156 H-2
-        tc.createAuditorsBatches(1);
-        tc.setTestDataAssignedFlag(1, true);
-        tc.startLMsubmissionsEvaluation(1);
-        vm.stopPrank();
-
-        (, address[] memory batchAuditors, uint[] memory modelIdxs, ) = ta
-            .getAuditorsBatch(1, 0);
-        for (uint i = 0; i < batchAuditors.length; i++) {
-            for (uint m = 0; m < modelIdxs.length; m++) {
-                bytes32 commitHash = keccak256(
-                    abi.encodePacked(uint256(100), true, TEST_SALT)
-                );
-                vm.prank(batchAuditors[i]);
-                ta.commitAuditScore(1, 0, modelIdxs[m], commitHash);
-            }
-        }
-
-        vm.prank(modelOwner);
-        tc.startLMsubmissionsEvaluationReveal(1);
-
-        for (uint i = 0; i < batchAuditors.length; i++) {
-            for (uint m = 0; m < modelIdxs.length; m++) {
-                vm.prank(batchAuditors[i]);
-                ta.revealAuditScore(1, 0, modelIdxs[m], 100, true, TEST_SALT);
-            }
-        }
-
-        vm.startPrank(modelOwner);
-        tc.closeLMsubmissionsEvaluation(1);
-        _lockAggSeedNow(1); // issue #156 H-2
-        tc.autoCreateTier1AndTier2(1);
-        tc.startT1Aggregation(1);
-        vm.stopPrank();
+        _setupToT1AggregationStarted(numAggregators, "dissentAgg");
 
         // 2 of the 3 assigned aggregators vote WINNING_CID; the 3rd (the
         // dissenter) votes a different CID. WINNING_CID still wins 2-1.
         (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, 0);
         dissenter = t1aggs[2];
+        bytes32[] memory cids = new bytes32[](t1aggs.length);
         for (uint i = 0; i < t1aggs.length; i++) {
-            bytes32 cid = t1aggs[i] == dissenter
+            cids[i] = t1aggs[i] == dissenter
                 ? bytes32(uint256(0xBAD))
                 : WINNING_CID;
-            vm.prank(t1aggs[i]);
-            tc.submitT1Aggregation(1, 0, cid);
         }
+        _commitAndRevealT1Dissenting(t1aggs, 1, 0, cids);
 
         vm.prank(modelOwner);
         tc.finalizeT1Aggregation(1);

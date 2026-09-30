@@ -392,14 +392,26 @@ contract StakingEnforcementTest is Test {
         (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, 0);
         bytes32 realCID = bytes32(uint256(0xC1D));
         for (uint i = 0; i < t1aggs.length; i++) {
+            bytes32 t1CommitHash = keccak256(
+                abi.encode(realCID, salt, t1aggs[i], uint(1), DINTaskCoordinator.TierKind.Tier1, uint(0))
+            );
             vm.prank(t1aggs[i]);
-            tc.submitT1Aggregation(1, 0, realCID);
+            tc.commitT1Aggregation(1, 0, t1CommitHash);
+        }
+
+        vm.prank(modelOwner);
+        tc.startT1AggregationReveal(1);
+
+        for (uint i = 0; i < t1aggs.length; i++) {
+            vm.prank(t1aggs[i]);
+            tc.revealT1Aggregation(1, 0, realCID, salt);
         }
 
         vm.startPrank(modelOwner);
         tc.finalizeT1Aggregation(1);
         tc.startT2Aggregation(1);
-        tc.finalizeT2Aggregation(1); // trivial: 0 T2 batches at exactly 3 aggregators
+        tc.startT2AggregationReveal(1); // trivial: 0 T2 batches at exactly 3 aggregators
+        tc.finalizeT2Aggregation(1);
         tc.slashAuditors(1);
         tc.slashAggregators(1);
         tc.endGI(1);
