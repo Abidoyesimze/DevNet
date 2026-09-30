@@ -108,7 +108,7 @@ Model registration requests, manifest updates, fee tiers, and per-model disable 
 - **Registration is request/approve:** `requestModelRegistration` (fee-paying) validates that both task contracts are currently authorized slashers and owned by the requester; `approveModel` (owner-only) **re-validates all four conditions at approval time** — slasher status or task-contract ownership changing between request and approval causes a typed revert (`CoordinatorNoLongerSlasher`, `AuditorOwnershipChanged`, …). This closes the TOCTOU gap between submission and review.
 - **Manifest updates** follow the same request/approve pattern with their own fee tier, gated by `onlyModelOwner` + `notDisabled`.
 - **Fees:** individual setters plus an atomic `setFees(...)`; `withdrawFees` uses the `call{value:}` + `TransferFailed` pattern.
-- **Access model.** The pre-upgrade contract used a bespoke `daoAdmin` field; the upgradeable version standardizes on `OwnableUpgradeable` (`transferOwnership`). The `daoAdmin()` / `setDAOAdmin()` compatibility shims it originally kept have since been removed (the unused `DAOAdminUpdated` event declaration remains).
+- **Access model.** The pre-upgrade contract used a bespoke `daoAdmin` field; the upgradeable version standardizes on `OwnableUpgradeable` (`transferOwnership`). The `daoAdmin()` / `setDAOAdmin()` compatibility shims it originally kept, and the `DAOAdminUpdated` event only `setDAOAdmin()` emitted, have since been removed.
 
 ## 5. Deployment order and wiring
 

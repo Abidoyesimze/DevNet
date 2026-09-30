@@ -65,7 +65,6 @@ contract DINModelRegistry is Initializable, OwnableUpgradeable {
         uint256 proprietaryUpdateFee
     );
     event FeesWithdrawn(address indexed to, uint256 amount);
-    event DAOAdminUpdated(address indexed oldAdmin, address indexed newAdmin);
 
     struct Model {
         address owner;
