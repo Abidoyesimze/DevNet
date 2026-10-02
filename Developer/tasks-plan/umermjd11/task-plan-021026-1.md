@@ -4,7 +4,7 @@
 **Author:** Umer Majeed (@umermjd11)
 **Reviewer:** @umeradl
 **Created:** 2026-10-02
-**Status:** Reviewed — amendments 1–8 from the [PR #209 review](https://github.com/InfiniteZeroFoundation/DevNet/pull/209) applied; reviewer decisions 1–4 pending
+**Status:** Approved design — review amendments 1–8 from the [PR #209 review](https://github.com/InfiniteZeroFoundation/DevNet/pull/209) applied; reviewer decisions 1–4 resolved ([decisions comment](https://github.com/InfiniteZeroFoundation/DevNet/pull/209#issuecomment-5943748290))
 **Proposed dates:** Oct 2 – Oct 12, 2026
 **Repo:** https://github.com/InfiniteZeroFoundation/DevNet
 **Base branch:** `develop` — plan written against commit `6ccc28c` (2026-09-30). Line numbers below are for that commit.
@@ -24,10 +24,10 @@ These are the open issues I can start **now**. Each one either has an agreed fix
 | # | Issue | Area | Why now |
 |---|---|---|---|
 | TP-1 | [#201](https://github.com/InfiniteZeroFoundation/DevNet/issues/201) **Part A** | `DINTaskCoordinator` size + CI size gate | Hard blocker. Nothing on `develop` can deploy to a real chain ([#201 decision comment](https://github.com/InfiniteZeroFoundation/DevNet/issues/201#issuecomment-5908303202)) |
-| TP-2 | [#206](https://github.com/InfiniteZeroFoundation/DevNet/issues/206) | `registerDINaggregator` missing `onlyCurrentGI` | One-line fix plus tests. Needs TP-1's bytes |
+| TP-2 | [#206](https://github.com/InfiniteZeroFoundation/DevNet/issues/206) | `registerDINaggregator` missing `onlyCurrentGI` | One-line fix plus tests. Ships in TP-1's PR as a second commit ([Decision 2](#reviewer-decisions)) |
 | TP-3 | [#192](https://github.com/InfiniteZeroFoundation/DevNet/issues/192) (Approved) | Auditor commit hash isn't sender-bound | Approved with amendments 1–6. PR #191/#197 conflicts are gone ([status comment](https://github.com/InfiniteZeroFoundation/DevNet/issues/192#issuecomment-5917136640)) |
 | TP-4 | [#202](https://github.com/InfiniteZeroFoundation/DevNet/issues/202) | dincli auditor commit retry + `aggregate-t2` stale batch id | dincli-only. Part 1 risks a slash for honest auditors |
-| TP-5 | [#205](https://github.com/InfiniteZeroFoundation/DevNet/issues/205) | Test-data dispute reward-pool drain | Security. `DINTaskAuditor` has headroom. Needs a design choice (see [Decisions](#decisions-needed-from-the-reviewer)) |
+| TP-5 | [#205](https://github.com/InfiniteZeroFoundation/DevNet/issues/205) | Test-data dispute reward-pool drain | Security. `DINTaskAuditor` has headroom. Design agreed: options 1 + 2, 100 DIN default bond ([Decision 3](#reviewer-decisions)) |
 | TP-6 | [#207](https://github.com/InfiniteZeroFoundation/DevNet/issues/207) | Wiki DIN-Representative page | PR #204 has merged, so the repo-side source page is final |
 
 ---
@@ -51,14 +51,14 @@ None of the six is implemented on `develop`:
 
 | Item | Touches | Conflicts with | Rule |
 |---|---|---|---|
-| TP-1 | `DINTaskCoordinator.sol` (getters, `slashAggregators`), `ci.yml`, `anvil.sh`, `CONTRIBUTING.md`, `dincli/cli/aggregator.py`, `dincli/cli/modelownerd/aggregation.py`, `dincli/abis/DINTaskCoordinator.json`, coordinator tests | TP-2 (same contract, size) | **First.** |
-| TP-2 | `DINTaskCoordinator.registerDINaggregator` + test | TP-1 | After TP-1 merges, or folded into TP-1 (see Decisions). |
+| TP-1 | `DINTaskCoordinator.sol` (getters, `slashAggregators`), `ci.yml`, `anvil.sh`, `CONTRIBUTING.md`, `dincli/cli/aggregator.py`, `dincli/cli/modelownerd/aggregation.py`, `dincli/abis/DINTaskCoordinator.json`, coordinator tests | TP-2 (same contract, size) | **First.** One PR with TP-2: commit 1 is the size refactor and gate. |
+| TP-2 | `DINTaskCoordinator.registerDINaggregator` + test | TP-1 | Commit 2 of TP-1's PR. It can't merge alone: it would put `develop` at 24,594 B and fail the gate. |
 | TP-3 | `DINTaskAuditor.revealAuditScore` + NatSpec, `dincli/cli/auditor.py`, ~12 foundry test files that commit scores, `DINTaskAuditor.md`, `DINShared.md` | TP-4 (`auditor.py`), TP-5 (`DINTaskAuditor.sol`) | **In parallel with TP-1.** Different contract. |
 | TP-4 | `dincli/cli/auditor.py` `evaluate_lms`, `dincli/cli/aggregator.py` `aggregate_t2`, new tests | TP-3 (hash helper), TP-1 (`aggregator.py` getter switch) | After TP-3 and TP-1. Part 2 alone could go earlier. |
 | TP-5 | `DINTaskAuditor` test-data dispute functions, `EncryptedTestData.t.sol`, `DINTaskAuditor.md` §13 | TP-3 (same contract) | After TP-3 merges, rebased. |
 | TP-6 | GitHub wiki only | — | Anytime. |
 
-One PR per item (TP-6 is a wiki edit, not a PR). Each PR rebases on `develop` after the previous one merges, with no stacked branches.
+One PR per item, except TP-1 + TP-2, which share a PR (TP-6 is a wiki edit, not a PR). Each PR rebases on `develop` after the previous one merges, with no stacked branches.
 
 Long-running drafts PR #31/#32 touch `DINTaskAuditor.sol` and `dincli/cli/auditor.py`. They rebase on these changes, not the other way round, as in the #192 approval review.
 
@@ -91,7 +91,7 @@ The trade-off is churn on **view** ABI only. No state-changing function, event, 
 
 ### `getAggregatorSubmission` `votes`
 
-`t1Votes`/`t2Votes` are keyed by **CID**, not by aggregator (`DINTaskCoordinator.sol:66,85`). So `votes` is defined as the vote count for the aggregator's **own revealed CID** (`t1Votes[GI][batchId][cid]`), and 0 before a reveal. Looking up votes for an arbitrary CID is no longer possible. Nothing calls that today (see [Decision 4](#decisions-needed-from-the-reviewer)).
+`t1Votes`/`t2Votes` are keyed by **CID**, not by aggregator (`DINTaskCoordinator.sol:66,85`). So `votes` is defined as the vote count for the aggregator's **own revealed CID** (`t1Votes[GI][batchId][cid]`), and 0 before a reveal. Looking up votes for an arbitrary CID is no longer possible. Nothing calls that today (accepted in [Decision 4](#reviewer-decisions)).
 
 **The margin is thin.** After TP-2 it's 1,025 B by my prototype (1 B over a 1,024 B budget) or 1,069 B by the review's (45 B over). The TP-1 PR restates it from its own build. If the reviewer wants more, these are the next candidates (not measured yet). I'll report their sizes in the PR:
 - fold `tier1FinalizedAt`/`tier2FinalizedAt` into a view
@@ -103,25 +103,28 @@ The trade-off is churn on **view** ABI only. No state-changing function, event, 
 - **A2. CI gate.** Add a step after `forge build` in `.github/workflows/ci.yml`, with a small script in `.github/scripts/`. It:
   - reads every `foundry/out/<file>.sol/<Contract>.json` for contracts under `foundry/src`, directly (not the `forge build --sizes` table, which leaves `DINTaskAuditor` out)
   - prints a size/margin table
-  - fails if any runtime size exceeds `24,576 − budget`
+  - **fails** if any contract's runtime margin is below **1,024 B**, and prints a **warning** (not a failure) if it's below **2,048 B** ([Decision 1](#reviewer-decisions)). Both thresholds are named constants in the script, so they're easy to raise later
   - also checks initcode against EIP-3860's 49,152 B
 - **A3. `foundry/anvil.sh`:** keep the override, but add a comment saying it hides EIP-170, and point to the CI gate.
-- **A4. Record the budget** in `Developer/CONTRIBUTING.md`.
+- **A4. Record both thresholds** (fail 1,024 B, warn 2,048 B) in `Developer/CONTRIBUTING.md`.
+- **A6. Report the extra candidates' sizes** (`FinalizedAt` view, merged tier errors) in the PR, even if not taken.
 - **A5. Docs:** update the state-variable and view tables in `DINTaskCoordinator.md`, and regenerate `dincli/abis/DINTaskCoordinator.json`.
 
 ## Deliverables
 
-- [ ] `DINTaskCoordinator` ≤ `24,576 − budget`. Before/after table in the PR
-- [ ] CI gate in place, and proven to fail on a deliberately oversized build (shown in the PR)
-- [ ] dincli call sites moved, with `pytest` green. Bundled ABI refreshed
+- [ ] `DINTaskCoordinator` margin ≥ 1,024 B with TP-2 included. Per-change and combined before/after table from one build in the PR
+- [ ] CI gate in place, proven to fail on a deliberately oversized build, and showing the 2,048 B warning in the log (both shown in the PR)
+- [ ] dincli call sites and `tests/test_aggregator_commit_retry.py` moved to `getAggregatorSubmission`, with `pytest` green. `dincli/abis/DINTaskCoordinator.json` regenerated in the same PR (Decision 4)
 - [ ] `forge test` green across the full suite, including `UpgradeValidation.t.sol`
-- [ ] `anvil.sh` comment, `CONTRIBUTING.md` budget, `DINTaskCoordinator.md` updated
+- [ ] `anvil.sh` comment, `CONTRIBUTING.md` thresholds, `DINTaskCoordinator.md` updated
 
 **Estimate:** 3 days.
 
 ---
 
 # TP-2 — #206: `onlyCurrentGI` on `registerDINaggregator`
+
+**Commit 2 of the TP-1 PR, not a separate PR** ([Decision 2](#reviewer-decisions)). Keep it a separate commit, so the security fix can be reviewed and reverted on its own.
 
 - Add `onlyCurrentGI(_GI)` to `registerDINaggregator` (`DINTaskCoordinator.sol:397`).
 - Regression tests: `registerDINaggregator(GI + 1)` and `registerDINaggregator(GI - 1)` revert with `TC_WrongGI`, and the current-GI path still works.
@@ -167,7 +170,7 @@ Implements the [approval review](https://github.com/InfiniteZeroFoundation/DevNe
 
 # TP-5 — #205: test-data dispute drain
 
-**Proposed design: #205 options 1 + 2.** This needs reviewer confirmation.
+**Agreed design: #205 options 1 + 2** ([Decision 3](#reviewer-decisions)). Option 3 (committing `keccak256(K)` on its own) is left to #181/#38.
 
 - **Only the model owner's reveal can resolve.**
   - `resolveTestDataDispute` becomes owner-only.
@@ -176,12 +179,13 @@ Implements the [approval review](https://github.com/InfiniteZeroFoundation/DevNe
 - **Silence loses.** If the owner doesn't reveal within `disputeWindowBlocks`, `closeExpiredDispute` (`:1540`) **upholds** the dispute (bond back, penalty, reassignment) instead of forfeiting the bond.
 - **Only batch auditors can open.**
   - `openTestDataDispute` requires `isBatchAuditor(gi, batchId, msg.sender)`.
-  - `disputeBondAmount` gets a non-zero default. The value is to be agreed; it's settable afterwards, as today.
+  - `disputeBondAmount` defaults to `100 * 1e18` DIN, matching `DINTaskCoordinator.disputeBond` (`DINTaskCoordinator.sol:149`). It stays settable as today; revisit it alongside #155's tokenomics values.
 - **Tests:**
   - a non-owner resolve reverts
   - an owner reveal with the true `K` clears the dispute
   - owner silence past the window upholds it
   - a non-batch-auditor open reverts
+  - the deployed default `disputeBondAmount` is `100 * 1e18`
   - rewrite `test_resolveDispute_upheld_returnsBondAndPenalises` / `_blocksFurtherOpen` (`EncryptedTestData.t.sol:319,341`), which currently encode the attack
 - **Docs:** remove the caveat in `DINTaskAuditor.md` §13 No. 1 and describe the new flow. Check for dincli commands that call these functions and update them if needed.
 - **Sizes:** `DINTaskAuditor` before/after in the PR. #201's acceptance covers both contracts, and TP-3 and TP-5 both grow the auditor.
@@ -200,12 +204,14 @@ Implements the [approval review](https://github.com/InfiniteZeroFoundation/DevNe
 
 ---
 
-## Decisions needed from the reviewer
+## Reviewer decisions
 
-1. **#201 budget:** is ≥ 1,024 B runtime margin confirmed? After TP-2, TP-1 clears it by 1 B (my prototype, 1,025 B) to 45 B (review prototype, 1,069 B). The TP-1 PR restates this from its own build. If you want more headroom now, say so and TP-1 takes the extra candidates listed above.
-2. **TP-1 + TP-2:** one PR or two? Two keeps the size refactor reviewable on its own. One avoids a 9 B follow-up PR.
-3. **#205 design:** are options 1 + 2 accepted? What default `disputeBondAmount` value?
-4. **View ABI churn in TP-1:** is replacing 10 public getters with `getAggregatorSubmission` acceptable? dincli is the only off-chain caller. Votes become readable only for an aggregator's own revealed CID, not for an arbitrary CID (unused today).
+Resolved 2026-10-02 in the [decisions comment](https://github.com/InfiniteZeroFoundation/DevNet/pull/209#issuecomment-5943748290). In each case the reviewer's recommended option was chosen.
+
+1. **#201 budget — fail below 1,024 B, warn below 2,048 B.** This unblocks the deploy now without widening TP-1, and CI shows which contracts are getting close before they run out.
+2. **TP-1 + TP-2 — one PR, two commits** (size refactor + gate, then the #206 modifier + tests). One review cycle for the security fix. Each commit can still be reviewed on its own, and the gate proves both fit together.
+3. **#205 — options 1 + 2, default `disputeBondAmount = 100 * 1e18`.** This closes the free drain with no new cryptography, and both dispute paths start from the same bond. Option 3 is left to #181/#38. The owner-as-judge trust assumption is the one #181 tracks.
+4. **View ABI — accept `getAggregatorSubmission`**, on two conditions: `votes` is the count for the aggregator's own revealed CID, and `dincli/abis/DINTaskCoordinator.json` is regenerated in the same PR.
 
 ---
 
