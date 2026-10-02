@@ -210,7 +210,7 @@ def show_t1_batches(
 
                 if detailed:
                     time.sleep(0.2)
-                    submission_cid = taskCoordinator_contract.functions.t1SubmissionCID(curr_GI, bid, validator).call()
+                    submission_cid = taskCoordinator_contract.functions.getAggregatorSubmission(curr_GI, TIER1, bid, validator).call()[3]
                     submission_cid_str = get_cid_from_bytes32(submission_cid.hex()) if submission_cid and any(submission_cid) else ""
                     table.add_row(str(bid), ", ".join(map(str, model_idxs)), str(finalized), cid_str, submission_cid_str)
                 found_batches = True
@@ -262,7 +262,7 @@ def show_t2_batches(
                     table.add_row(str(bid), str(finalized), cid_str)
                 else:
                     time.sleep(0.2)
-                    submission_cid = taskCoordinator_contract.functions.t2SubmissionCID(curr_GI, bid, validator).call()
+                    submission_cid = taskCoordinator_contract.functions.getAggregatorSubmission(curr_GI, TIER2, bid, validator).call()[3]
                     submission_cid_str = get_cid_from_bytes32(submission_cid.hex()) if submission_cid and any(submission_cid) else ""
                     table.add_row(str(bid), str(finalized), cid_str, submission_cid_str)
                 found_batches = True
@@ -319,7 +319,7 @@ def aggregate_t1(
         # A retry must never replace the salt behind an existing on-chain
         # commitment -- the reveal would then fail TC_T1RevealHashMismatch and
         # the aggregator be S2-slashed. Skip before re-aggregating.
-        if submit and taskCoordinator_contract.functions.t1Committed(curr_GI, bid, account.address).call():
+        if submit and taskCoordinator_contract.functions.getAggregatorSubmission(curr_GI, TIER1, bid, account.address).call()[0]:
             console.print(f"[yellow]T1 batch {bid} already committed by {account.address}; skipping (reveal with `dincli aggregator reveal-t1`).[/yellow]")
             continue
 
@@ -529,7 +529,7 @@ def aggregate_t2(
         
         # Same retry guard as aggregate-t1: never replace the salt behind an
         # existing on-chain commitment.
-        if submit and taskCoordinator_contract.functions.t2Committed(curr_GI, i, account.address).call():
+        if submit and taskCoordinator_contract.functions.getAggregatorSubmission(curr_GI, TIER2, i, account.address).call()[0]:
             found_batch = True
             console.print(f"[yellow]T2 batch {i} already committed by {account.address}; skipping (reveal with `dincli aggregator reveal-t2`).[/yellow]")
             continue

@@ -47,6 +47,11 @@ For issue-specific contributor packets, review questions, and curated reading li
   dincli system dump-abi --artifact foundry/out/<Contract>.sol/<Contract>.json --output dincli/abis --official
   ```
   `dincli/abis/*.json` is the only ABI dincli has for the platform contracts (`DinCoordinator`, `DinToken`, `DinValidatorStake`, `DINModelRegistry`, `DinFeeRouter`), and the fallback for `DINTaskCoordinator`/`DINTaskAuditor` when a model's manifest doesn't supply custom `task_contracts` artifacts. A stale bundle means dincli calls functions that no longer exist (`AttributeError`) or decodes events/structs against the wrong layout. No network or wallet needed to run it. See [issue #177](https://github.com/InfiniteZeroFoundation/DevNet/issues/177) for what drifting looks like when this is skipped.
+- **Contract size budget.** Every deployable `foundry/src` contract must keep at least **1,024 B** of runtime headroom under EIP-170's 24,576 B. Initcode must stay under EIP-3860's 49,152 B. CI enforces both with `.github/scripts/contract_size_gate.py`, and warns when a contract's margin drops below **2,048 B**. Both thresholds are constants at the top of the script (issue #201). Check locally after `forge build`:
+  ```
+  cd foundry && python3 ../.github/scripts/contract_size_gate.py
+  ```
+  `foundry/anvil.sh` lifts the limit on the local chain, so a local deploy is not a size check. A PR that pushes a contract under the 1,024 B fail line needs a size reduction in the same PR. Don't split a contract without raising it with a maintainer first.
 
 ## Code Standards
 

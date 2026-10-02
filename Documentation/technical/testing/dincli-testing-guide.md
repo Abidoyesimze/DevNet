@@ -10,7 +10,7 @@ The chain backend and platform deploy script are chosen by
 chain ID 1337 on `http://127.0.0.1:8545`.
 
 > [!WARNING]
-> `foundry/anvil.sh` starts Anvil with `--code-size-limit 4294967295`, so the local chain accepts contracts above the 24,576-byte EIP-170 limit. `DINTaskCoordinator` is currently over that limit (issue #201), so a green local run does not show that a contract can be deployed to a real chain.
+> `foundry/anvil.sh` starts Anvil with `--code-size-limit 4294967295`, so the local chain accepts contracts above the 24,576-byte EIP-170 limit. A green local run therefore does not show that a contract can be deployed to a real chain. CI enforces the limit instead, with `.github/scripts/contract_size_gate.py` (issue #201).
 
 ---
 
