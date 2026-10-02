@@ -241,7 +241,10 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
     mapping(uint256 => mapping(uint => mapping(address => mapping(uint => bool)))) // GI // batchId // auditor // modelIndex // has voted
         public hasAuditedLM;
 
-    // Commit-then-reveal (task_210726_6 §2a). commitHash = keccak256(abi.encodePacked(score, vote, salt)).
+    // Commit-then-reveal (task_210726_6 §2a). commitHash =
+    // keccak256(abi.encode(score, vote, salt, auditor, gi, batchId, modelIndex)):
+    // binding the auditor and (gi, batchId, modelIndex) stops a peer copying
+    // another auditor's commit hash and reveal (issue #192).
     // hasCommittedLM is distinct from hasAuditedLM: hasAuditedLM is set only
     // on a successful reveal and remains the single source of truth for
     // quorum/median counting, exactly as before -- an auditor who commits
@@ -1077,8 +1080,12 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
     /// @notice Phase 1 of commit-then-reveal auditor scoring: lock in a
     ///         hidden (score, vote) pair.
     /// @dev Caller must be the assigned auditor for this batch and model
-    ///      index. `commitHash` must equal `keccak256(abi.encodePacked(score,
-    ///      vote, salt))` for the values the auditor intends to reveal later
+    ///      index. `commitHash` must equal `keccak256(abi.encode(score, vote,
+    ///      salt, msg.sender, gi, batchId, modelIndex))` for the values the
+    ///      auditor intends to reveal later. Binding the auditor's own address
+    ///      and the (gi, batchId, modelIndex) slot means a peer can't copy this
+    ///      hash and later replay this auditor's reveal (issue #192), and an
+    ///      auditor can't reuse one commit for another model, batch or GI
     ///      -- the contract cannot and does not validate this at commit time
     ///      (that's the point; nothing about score/vote is visible yet).
     ///      Open only while GIstate == LMSevaluationStarted (the commit
@@ -1088,7 +1095,7 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
     /// @param gi Current GI index.
     /// @param batchId Batch index containing this model.
     /// @param modelIndex Index into lmSubmissions[gi] for the model being scored.
-    /// @param commitHash keccak256(abi.encodePacked(score, vote, salt)).
+    /// @param commitHash keccak256(abi.encode(score, vote, salt, msg.sender, gi, batchId, modelIndex)).
     function commitAuditScore(
         uint256 gi,
         uint batchId,
@@ -1157,7 +1164,9 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
         if (hasAuditedLM[gi][batchId][msg.sender][modelIndex])
             revert TA_AlreadyVoted();
 
-        bytes32 expectedHash = keccak256(abi.encodePacked(score, vote, salt));
+        bytes32 expectedHash = keccak256(
+            abi.encode(score, vote, salt, msg.sender, gi, batchId, modelIndex)
+        );
         if (
             expectedHash !=
             auditScoreCommits[gi][batchId][msg.sender][modelIndex]

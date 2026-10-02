@@ -21,6 +21,7 @@ import {DinTreasury} from "../src/DinTreasury.sol";
 import {DinFeeRouter} from "../src/DinFeeRouter.sol";
 import {DINTaskCoordinator} from "../src/DINTaskCoordinator.sol";
 import {DINTaskAuditor} from "../src/DINTaskAuditor.sol";
+import {auditCommitHash} from "./utils/AuditCommitHash.sol";
 
 contract PR146SlashingRegressionTest is Test {
     // ─────────────────────────────────────────────────────────────────────
@@ -194,11 +195,10 @@ contract PR146SlashingRegressionTest is Test {
 
         // Only batch 0 votes -- batch 1's auditors miss their vote entirely.
         (, address[] memory batch0Auditors, uint[] memory batch0Models, ) = ta.getAuditorsBatch(1, 0);
-        bytes32 commitHash = keccak256(abi.encodePacked(uint256(100), true, TEST_SALT));
         for (uint i = 0; i < batch0Auditors.length; i++) {
             for (uint m = 0; m < batch0Models.length; m++) {
                 vm.prank(batch0Auditors[i]);
-                ta.commitAuditScore(1, 0, batch0Models[m], commitHash);
+                ta.commitAuditScore(1, 0, batch0Models[m], auditCommitHash(uint256(100), true, TEST_SALT, batch0Auditors[i], 1, 0, batch0Models[m]));
             }
         }
 

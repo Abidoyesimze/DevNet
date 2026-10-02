@@ -7,6 +7,7 @@ from typing import Optional
 import typer
 from rich.table import Table
 from web3 import Web3
+from eth_abi import encode as abi_encode
 from nacl.public import Box, PrivateKey, PublicKey
 import nacl.encoding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -68,6 +69,18 @@ def _load_commit(model_base_dir: Path, gi: int, batch_id: int, model_index: int)
         data = json.load(f)
     data["salt"] = bytes.fromhex(data["salt"])
     return data
+
+
+def _audit_commit_hash(score: int, vote: bool, salt: bytes, sender: str, gi: int, batch_id: int, model_index: int) -> bytes:
+    """keccak256(abi.encode(score, vote, salt, msg.sender, gi, batchId, modelIndex)) --
+    must match DINTaskAuditor.revealAuditScore exactly, including plain
+    (non-packed) ABI encoding. Binding the auditor and the (gi, batch, model)
+    slot stops a peer replaying this auditor's commit and reveal (issue #192)."""
+    encoded = abi_encode(
+        ["uint256", "bool", "bytes32", "address", "uint256", "uint256", "uint256"],
+        [score, vote, salt, Web3.to_checksum_address(sender), gi, batch_id, model_index],
+    )
+    return Web3.keccak(encoded)
 
 app = typer.Typer(help="Commands for Auditors in DIN.")
 
@@ -531,8 +544,8 @@ def evaluate_lms(
                 score_int = int(score)
                 vote_bool = bool(eligible)
                 salt = secrets.token_bytes(32)
-                commit_hash = Web3.solidity_keccak(
-                    ["uint256", "bool", "bytes32"], [score_int, vote_bool, salt]
+                commit_hash = _audit_commit_hash(
+                    score_int, vote_bool, salt, account.address, curr_GI, batch_id, model_index
                 )
 
                 try:

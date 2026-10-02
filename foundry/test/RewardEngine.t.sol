@@ -19,6 +19,7 @@ import {DINModelRegistry} from "../src/DINModelRegistry.sol";
 import {DINTaskCoordinator} from "../src/DINTaskCoordinator.sol";
 import {DINTaskAuditor} from "../src/DINTaskAuditor.sol";
 import {GIstates} from "../src/DINShared.sol";
+import {auditCommitHash} from "./utils/AuditCommitHash.sol";
 
 contract RewardEngineTest is Test {
     using stdStorage for StdStorage;
@@ -218,11 +219,8 @@ contract RewardEngineTest is Test {
         (, address[] memory batchAuditors, uint[] memory modelIdxs, ) = ta.getAuditorsBatch(1, 0);
         for (uint i = 0; i < batchAuditors.length; i++) {
             for (uint m = 0; m < modelIdxs.length; m++) {
-                bytes32 commitHash = keccak256(
-                    abi.encodePacked(uint256(80), true, TEST_SALT)
-                );
                 vm.prank(batchAuditors[i]);
-                ta.commitAuditScore(1, 0, modelIdxs[m], commitHash);
+                ta.commitAuditScore(1, 0, modelIdxs[m], auditCommitHash(uint256(80), true, TEST_SALT, batchAuditors[i], 1, 0, modelIdxs[m]));
             }
         }
 
@@ -959,13 +957,10 @@ contract RewardEngineTest is Test {
 
         (, address[] memory b0Auditors, uint[] memory b0Models, ) = ta
             .getAuditorsBatch(1, 0);
-        bytes32 commitHash = keccak256(
-            abi.encodePacked(uint256(80), true, TEST_SALT)
-        );
         for (uint i = 0; i < b0Auditors.length; i++) {
             for (uint m = 0; m < b0Models.length; m++) {
                 vm.prank(b0Auditors[i]);
-                ta.commitAuditScore(1, 0, b0Models[m], commitHash);
+                ta.commitAuditScore(1, 0, b0Models[m], auditCommitHash(uint256(80), true, TEST_SALT, b0Auditors[i], 1, 0, b0Models[m]));
             }
         }
 

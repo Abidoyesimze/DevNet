@@ -37,6 +37,7 @@ import {
     TC_T2RevealHashMismatch,
     TC_T2RevealPhaseNotOpen
 } from "../src/DINShared.sol";
+import {auditCommitHash} from "./utils/AuditCommitHash.sol";
 
 contract AggregatorCommitRevealTest is Test {
     DinToken tokenImpl;
@@ -219,11 +220,10 @@ contract AggregatorCommitRevealTest is Test {
         vm.stopPrank();
 
         (, address[] memory batchAuditors, uint[] memory modelIdxs, ) = ta.getAuditorsBatch(1, 0);
-        bytes32 scoreCommit = keccak256(abi.encodePacked(uint256(100), true, TEST_SALT));
         for (uint i = 0; i < batchAuditors.length; i++) {
             for (uint m = 0; m < modelIdxs.length; m++) {
                 vm.prank(batchAuditors[i]);
-                ta.commitAuditScore(1, 0, modelIdxs[m], scoreCommit);
+                ta.commitAuditScore(1, 0, modelIdxs[m], auditCommitHash(uint256(100), true, TEST_SALT, batchAuditors[i], 1, 0, modelIdxs[m]));
             }
         }
 

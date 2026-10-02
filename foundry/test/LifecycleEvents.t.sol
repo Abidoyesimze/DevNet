@@ -23,6 +23,7 @@ import {DinValidatorStake} from "../src/DinValidatorStake.sol";
 import {DINTaskCoordinator} from "../src/DINTaskCoordinator.sol";
 import {DINTaskAuditor} from "../src/DINTaskAuditor.sol";
 import {GIstates} from "../src/DINShared.sol";
+import {auditCommitHash} from "./utils/AuditCommitHash.sol";
 
 contract LifecycleEventsTest is Test {
     DinToken token;
@@ -229,9 +230,8 @@ contract LifecycleEventsTest is Test {
             (, address[] memory batchAuditors, uint[] memory modelIdxs, ) = ta.getAuditorsBatch(giIndex, ab);
             for (uint ai = 0; ai < batchAuditors.length; ai++) {
                 for (uint mi = 0; mi < modelIdxs.length; mi++) {
-                    bytes32 ch = keccak256(abi.encodePacked(uint256(80), true, TEST_SALT));
                     vm.prank(batchAuditors[ai]);
-                    ta.commitAuditScore(giIndex, ab, modelIdxs[mi], ch);
+                    ta.commitAuditScore(giIndex, ab, modelIdxs[mi], auditCommitHash(uint256(80), true, TEST_SALT, batchAuditors[ai], giIndex, ab, modelIdxs[mi]));
                 }
             }
         }
@@ -580,9 +580,8 @@ contract LifecycleEventsTest is Test {
         (, address[] memory batchAuditors, uint[] memory modelIdxs, ) = ta.getAuditorsBatch(1, 0);
         for (uint ai = 0; ai < batchAuditors.length; ai++) {
             for (uint mi = 0; mi < modelIdxs.length; mi++) {
-                bytes32 ch = keccak256(abi.encodePacked(uint256(80), true, TEST_SALT));
                 vm.prank(batchAuditors[ai]);
-                ta.commitAuditScore(1, 0, modelIdxs[mi], ch);
+                ta.commitAuditScore(1, 0, modelIdxs[mi], auditCommitHash(uint256(80), true, TEST_SALT, batchAuditors[ai], 1, 0, modelIdxs[mi]));
             }
         }
 

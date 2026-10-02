@@ -20,6 +20,7 @@ import {DINModelRegistry} from "../src/DINModelRegistry.sol";
 import {DINTaskCoordinator} from "../src/DINTaskCoordinator.sol";
 import {DINTaskAuditor} from "../src/DINTaskAuditor.sol";
 import "../src/DINShared.sol" as Shared;
+import {auditCommitHash} from "./utils/AuditCommitHash.sol";
 
 // Pull the custom errors into scope so vm.expectRevert(Error.selector) compiles.
 error TC_DisputeNotAwaitingRecomputation();
@@ -245,11 +246,8 @@ contract DisputeResolutionTest is Test {
             .getAuditorsBatch(1, 0);
         for (uint i = 0; i < batchAuditors.length; i++) {
             for (uint m = 0; m < modelIdxs.length; m++) {
-                bytes32 commitHash = keccak256(
-                    abi.encodePacked(uint256(100), true, TEST_SALT)
-                );
                 vm.prank(batchAuditors[i]);
-                ta.commitAuditScore(1, 0, modelIdxs[m], commitHash);
+                ta.commitAuditScore(1, 0, modelIdxs[m], auditCommitHash(uint256(100), true, TEST_SALT, batchAuditors[i], 1, 0, modelIdxs[m]));
             }
         }
 
