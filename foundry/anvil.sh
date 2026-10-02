@@ -6,7 +6,10 @@ anvil \
   --code-size-limit 4294967295 \
   --block-time 2 \
   --mnemonic "test test test test test test test test test test test junk"
-#   --code-size-limit 4294967295
+#   --code-size-limit 4294967295: lifts the EIP-170 24,576-byte runtime
+#   limit, so local deploys accept contracts a real chain would reject.
+#   CI enforces the limit instead: .github/scripts/contract_size_gate.py
+#   fails any foundry/src contract with < 1,024 B margin (issue #201).
 #   --block-time 2: without a block-time, anvil only mines when a tx
 #   arrives, so an idle chain sits at block 0 forever. dincli's
 #   ensure_batch_seed_locked (issue #156 H-2) polls w3.eth.block_number

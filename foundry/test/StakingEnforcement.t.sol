@@ -21,6 +21,7 @@ import {GIstates} from "../src/DINShared.sol";
 import {
     TC_StakeBelowModelFloor,
     TC_ConcurrentRegistrationCapReached,
+    TC_WrongGI,
     TA_StakeBelowModelFloor,
     TA_ConcurrentRegistrationCapReached
 } from "../src/DINShared.sol";
@@ -285,6 +286,40 @@ contract StakingEnforcementTest is Test {
         assertEq(stake.activeRegistrationCount(agg1), 0);
         vm.prank(agg1);
         tc.registerDINaggregator(1);
+        assertEq(stake.activeRegistrationCount(agg1), 1);
+    }
+
+    // ── registerDINaggregator is pinned to the current GI (issue #206) ───────
+
+    /// @dev Without onlyCurrentGI, a validator could register for GI N+1 during
+    ///      GI N's window and fill its aggregator list before it opened.
+    function test_registerDINaggregator_futureGI_reverts() public {
+        _stake(agg1, MIN_STAKE_AMOUNT);
+        _advanceToAggregatorRegistration();
+        vm.prank(agg1);
+        vm.expectRevert(TC_WrongGI.selector);
+        tc.registerDINaggregator(2);
+        assertEq(stake.activeRegistrationCount(agg1), 0);
+    }
+
+    /// @dev A past GI (here GI 0 while GI 1 is open) would otherwise leak a
+    ///      concurrent-registration slot that releaseGIRegistrationSlots never frees.
+    function test_registerDINaggregator_pastGI_reverts() public {
+        _stake(agg1, MIN_STAKE_AMOUNT);
+        _advanceToAggregatorRegistration();
+        vm.prank(agg1);
+        vm.expectRevert(TC_WrongGI.selector);
+        tc.registerDINaggregator(0);
+        assertEq(stake.activeRegistrationCount(agg1), 0);
+    }
+
+    function test_registerDINaggregator_currentGI_registers() public {
+        _stake(agg1, MIN_STAKE_AMOUNT);
+        _advanceToAggregatorRegistration();
+        vm.prank(agg1);
+        tc.registerDINaggregator(1);
+        assertTrue(tc.isDINAggregator(1, agg1));
+        assertFalse(tc.isDINAggregator(2, agg1));
         assertEq(stake.activeRegistrationCount(agg1), 1);
     }
 

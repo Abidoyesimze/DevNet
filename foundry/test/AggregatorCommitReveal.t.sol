@@ -296,8 +296,46 @@ contract AggregatorCommitRevealTest is Test {
         _openT1RevealPhase();
         _revealT1(t1aggs[0], 0, CID_A);
 
-        assertTrue(tc.t1Submitted(1, 0, t1aggs[0]));
-        assertEq(tc.t1SubmissionCID(1, 0, t1aggs[0]), CID_A);
+        (, , bool submitted, bytes32 cid, ) = tc.getAggregatorSubmission(1, DINTaskCoordinator.TierKind.Tier1, 0, t1aggs[0]);
+        assertTrue(submitted);
+        assertEq(cid, CID_A);
+    }
+
+    /// @dev getAggregatorSubmission (issue #201 Part A) replaces the former
+    ///      public t1*/t2* getters: committed-only state before reveal, then
+    ///      the revealed CID and that CID's vote count.
+    function test_getAggregatorSubmission_t1_commitThenReveal() public {
+        _runToT1AggregationStarted();
+        (, address[] memory t1aggs, , , ) = tc.getTier1Batch(1, 0);
+        _commitT1(t1aggs[0], 0, CID_A);
+        _commitT1(t1aggs[1], 0, CID_A);
+
+        (bool committed, bytes32 commitHash, bool submitted, bytes32 cid, uint votes) =
+            tc.getAggregatorSubmission(1, DINTaskCoordinator.TierKind.Tier1, 0, t1aggs[0]);
+        assertTrue(committed);
+        assertEq(commitHash, _t1CommitHash(t1aggs[0], CID_A, TEST_SALT, 0));
+        assertFalse(submitted);
+        assertEq(cid, bytes32(0));
+        assertEq(votes, 0);
+
+        _openT1RevealPhase();
+        _revealT1(t1aggs[0], 0, CID_A);
+        _revealT1(t1aggs[1], 0, CID_A);
+
+        (committed, , submitted, cid, votes) =
+            tc.getAggregatorSubmission(1, DINTaskCoordinator.TierKind.Tier1, 0, t1aggs[0]);
+        assertTrue(committed);
+        assertTrue(submitted);
+        assertEq(cid, CID_A);
+        assertEq(votes, 2);
+
+        // An assigned aggregator who never committed reads all-zero.
+        (committed, commitHash, submitted, cid, votes) =
+            tc.getAggregatorSubmission(1, DINTaskCoordinator.TierKind.Tier1, 0, t1aggs[2]);
+        assertFalse(committed);
+        assertEq(commitHash, bytes32(0));
+        assertFalse(submitted);
+        assertEq(votes, 0);
     }
 
     /// @dev issue #156 M-1's actual hardening: the commit hash binds
@@ -473,6 +511,31 @@ contract AggregatorCommitRevealTest is Test {
         (, t2aggs, , ) = tc.getTier2Batch(1, 0);
     }
 
+    function test_getAggregatorSubmission_t2_commitThenReveal() public {
+        address[] memory t2aggs = _runToT2AggregationStarted();
+        _commitT2(t2aggs[0], CID_B);
+
+        (bool committed, bytes32 commitHash, bool submitted, , uint votes) =
+            tc.getAggregatorSubmission(1, DINTaskCoordinator.TierKind.Tier2, 0, t2aggs[0]);
+        assertTrue(committed);
+        assertEq(commitHash, _t2CommitHash(t2aggs[0], CID_B, TEST_SALT));
+        assertFalse(submitted);
+        assertEq(votes, 0);
+
+        _openT2RevealPhase();
+        _revealT2(t2aggs[0], CID_B);
+
+        bytes32 cid;
+        (, , submitted, cid, votes) = tc.getAggregatorSubmission(1, DINTaskCoordinator.TierKind.Tier2, 0, t2aggs[0]);
+        assertTrue(submitted);
+        assertEq(cid, CID_B);
+        assertEq(votes, 1);
+
+        // Tier is honoured: the same address/batch under Tier1 reads the T1 state.
+        (, , , cid, ) = tc.getAggregatorSubmission(1, DINTaskCoordinator.TierKind.Tier1, 0, t2aggs[0]);
+        assertTrue(cid != CID_B);
+    }
+
     function test_t2_copyAttack_replayingPeerCommitHash_cannotReveal() public {
         address[] memory t2aggs = _runToT2AggregationStarted();
         bytes32 honestCommitHash = _t2CommitHash(t2aggs[0], CID_B, TEST_SALT);
@@ -596,8 +659,12 @@ contract AggregatorCommitRevealTest is Test {
 
         vm.prank(modelOwner);
         tc.finalizeT1Aggregation(1);
-        assertTrue(tc.t1Submitted(1, 0, t1aggs[0]));
-        assertFalse(tc.t1Submitted(1, 0, t1aggs[2]), "committed but never revealed -- excluded like a non-participant");
+        (, , bool revealed0, , ) = tc.getAggregatorSubmission(1, DINTaskCoordinator.TierKind.Tier1, 0, t1aggs[0]);
+        (bool committed2, , bool revealed2, , ) =
+            tc.getAggregatorSubmission(1, DINTaskCoordinator.TierKind.Tier1, 0, t1aggs[2]);
+        assertTrue(revealed0);
+        assertTrue(committed2);
+        assertFalse(revealed2, "committed but never revealed -- excluded like a non-participant");
 
         // Run T2 to completion too (the fixture's other 3 aggregators form a
         // real T2 batch, not a trivial empty one) so slashAuditors/

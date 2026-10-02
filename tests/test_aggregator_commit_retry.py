@@ -50,8 +50,9 @@ def _make_contract(state):
             return lambda gi, i: _Call((0, [ACCOUNT], [], False, b"\x00" * 32))
         if name == "getTier2Batch":
             return lambda gi, i: _Call((0, [ACCOUNT], False, b"\x00" * 32))
-        if name in ("t1Committed", "t2Committed"):
-            return lambda gi, bid, who: _Call(state["committed"])
+        if name == "getAggregatorSubmission":
+            # (committed, commitHash, submitted, cid, votes)
+            return lambda gi, tier, bid, who: _Call((state["committed"], b"\x00" * 32, False, b"\x00" * 32, 0))
         if name in ("commitT1Aggregation", "commitT2Aggregation"):
             def _commit(*args):
                 state["commits"].append((name, args))

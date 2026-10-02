@@ -61,6 +61,13 @@ jobs:
         working-directory: foundry
         run: forge build
 
+      # EIP-170/EIP-3860 budget for every foundry/src contract: fails below a
+      # 1,024 B runtime margin, warns below 2,048 B. Reads artifacts directly
+      # because `forge build --sizes` omits DINTaskAuditor. Issue #201 Part A.
+      - name: contract size gate
+        working-directory: foundry
+        run: python3 ../.github/scripts/contract_size_gate.py
+
       - name: forge test
         working-directory: foundry
         run: forge test

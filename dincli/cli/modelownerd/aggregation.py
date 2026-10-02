@@ -106,7 +106,7 @@ def show_t1_batches(
             final_cid = get_cid_from_bytes32(final_cid_raw.hex()) if final_cid_raw and final_cid_raw != bytes(32) else "Pending"
             
             for validator in validators:
-                submitted_cid_raw = task_coordinator_Contract.functions.t1SubmissionCID(ref_gi, bid, validator).call()
+                submitted_cid_raw = task_coordinator_Contract.functions.getAggregatorSubmission(ref_gi, 0, bid, validator).call()[3]  # 0 = TierKind.Tier1; [3] = revealed cid
                 submitted_cid = get_cid_from_bytes32(submitted_cid_raw.hex()) if submitted_cid_raw and submitted_cid_raw != bytes(32) else "None"
                 idxs_display = ", ".join(map(str, model_idxs))
                 detailed_table.add_row(str(bid), validator, submitted_cid, idxs_display, final_cid)
@@ -151,7 +151,7 @@ def show_t2_batches(
         else:
             submitted_parts = []
             for v in validators:
-                sub_raw = task_coordinator_Contract.functions.t2SubmissionCID(ref_gi, bid, v).call()
+                sub_raw = task_coordinator_Contract.functions.getAggregatorSubmission(ref_gi, 1, bid, v).call()[3]  # 1 = TierKind.Tier2
                 submitted_parts.append(get_cid_from_bytes32(sub_raw.hex()) if sub_raw and sub_raw != bytes(32) else "")
             submitted_cid_display = "\n".join(submitted_parts)
             table.add_row(str(bid), val_display, submitted_cid_display, str(finalized), cid)

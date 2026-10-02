@@ -50,7 +50,11 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         bytes32 finalCID; // Majority‐agreed CID
     }
 
-    mapping(uint => Tier1Batch[]) public tier1Batches;
+    // tier1Batches/tier2Batches and the t1*/t2* per-aggregator maps below are
+    // internal to keep this contract under EIP-170 (issue #201 Part A): read
+    // batches via getTier1Batch/getTier2Batch and per-aggregator commit/reveal
+    // state via getAggregatorSubmission.
+    mapping(uint => Tier1Batch[]) internal tier1Batches;
     mapping(uint => mapping(uint => mapping(address => bool))) isTier1Aggregator;
 
     // Audit & voting maps            GI  ➜  batchId ➜ validator  ➜  …
@@ -60,12 +64,12 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     // what slashAggregators()'s existing "no submission" (S2) check already
     // reads, so that loop needed no changes for the commit-reveal split.
     mapping(uint => mapping(uint => mapping(address => bytes32)))
-        public t1SubmissionCID;
+        internal t1SubmissionCID;
     mapping(uint => mapping(uint => mapping(address => bool)))
-        public t1Submitted;
-    mapping(uint => mapping(uint => mapping(bytes32 => uint))) public t1Votes; // CID ➜ votes
-    mapping(uint => mapping(uint => mapping(address => bytes32))) public t1CommitHash;
-    mapping(uint => mapping(uint => mapping(address => bool))) public t1Committed;
+        internal t1Submitted;
+    mapping(uint => mapping(uint => mapping(bytes32 => uint))) internal t1Votes; // CID ➜ votes
+    mapping(uint => mapping(uint => mapping(address => bytes32))) internal t1CommitHash;
+    mapping(uint => mapping(uint => mapping(address => bool))) internal t1Committed;
 
     struct Tier2Batch {
         uint batchId;
@@ -74,17 +78,17 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         bytes32 finalCID;
     }
 
-    mapping(uint => Tier2Batch[]) public tier2Batches;
+    mapping(uint => Tier2Batch[]) internal tier2Batches;
     mapping(uint => mapping(uint => mapping(address => bool))) isTier2Aggregator;
     mapping(uint => uint) public tier2Score;
 
     mapping(uint => mapping(uint => mapping(address => bytes32)))
-        public t2SubmissionCID;
+        internal t2SubmissionCID;
     mapping(uint => mapping(uint => mapping(address => bool)))
-        public t2Submitted;
-    mapping(uint => mapping(uint => mapping(bytes32 => uint))) public t2Votes;
-    mapping(uint => mapping(uint => mapping(address => bytes32))) public t2CommitHash;
-    mapping(uint => mapping(uint => mapping(address => bool))) public t2Committed;
+        internal t2Submitted;
+    mapping(uint => mapping(uint => mapping(bytes32 => uint))) internal t2Votes;
+    mapping(uint => mapping(uint => mapping(address => bytes32))) internal t2CommitHash;
+    mapping(uint => mapping(uint => mapping(address => bool))) internal t2Committed;
 
     /// @notice Per-aggregator count of finalized T1/T2 batches they were
     ///         assigned to in a GI, one increment per (aggregator,
@@ -394,7 +398,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     /// @notice Registers the caller as an aggregator for the current GI.
     /// @dev Caller must be an active validator; duplicate registrations revert.
     /// @param _GI Current GI index.
-    function registerDINaggregator(uint _GI) public {
+    function registerDINaggregator(uint _GI) public onlyCurrentGI(_GI) {
         if (GIstate != GIstates.DINaggregatorsRegistrationStarted)
             revert TC_AggregatorsRegistrationNotOpen();
 
@@ -778,6 +782,46 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         return (b.batchId, b.aggregators, b.finalized, b.finalCID);
     }
 
+    /// @notice One aggregator's commit-then-reveal state for a T1 or T2 batch.
+    /// @dev Replaces the former public t1*/t2* getters (issue #201 Part A).
+    ///      `votes` is the vote count of this aggregator's own revealed CID
+    ///      (t1Votes/t2Votes are keyed by CID, not by aggregator). Before a
+    ///      reveal `cid` is zero, and the zero CID never has votes (reveal
+    ///      rejects it with TC_ZeroCID), so `votes` is 0 until the reveal.
+    /// @param _GI GI index.
+    /// @param tier Tier1 or Tier2.
+    /// @param _batchId Batch index (always 0 for Tier2).
+    /// @param aggregator Aggregator address.
+    /// @return committed True once the aggregator has committed.
+    /// @return commitHash The stored commit hash.
+    /// @return submitted True once the aggregator has revealed.
+    /// @return cid The revealed CID (zero before reveal).
+    /// @return votes Votes for `cid` in this batch (zero before reveal).
+    function getAggregatorSubmission(
+        uint _GI,
+        TierKind tier,
+        uint _batchId,
+        address aggregator
+    )
+        external
+        view
+        returns (bool committed, bytes32 commitHash, bool submitted, bytes32 cid, uint votes)
+    {
+        if (tier == TierKind.Tier1) {
+            committed = t1Committed[_GI][_batchId][aggregator];
+            commitHash = t1CommitHash[_GI][_batchId][aggregator];
+            submitted = t1Submitted[_GI][_batchId][aggregator];
+            cid = t1SubmissionCID[_GI][_batchId][aggregator];
+            votes = t1Votes[_GI][_batchId][cid];
+        } else {
+            committed = t2Committed[_GI][_batchId][aggregator];
+            commitHash = t2CommitHash[_GI][_batchId][aggregator];
+            submitted = t2Submitted[_GI][_batchId][aggregator];
+            cid = t2SubmissionCID[_GI][_batchId][aggregator];
+            votes = t2Votes[_GI][_batchId][cid];
+        }
+    }
+
     /// @notice Transitions GI state to T1AggregationStarted, opening the
     ///         Tier-1 commit window for assigned aggregators
     ///         (commitT1Aggregation).
@@ -1105,8 +1149,11 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
 
     /// @notice Slashes aggregators in both Tier-1 and Tier-2 batches that failed
     ///         to submit or submitted a CID that did not match the consensus.
-    /// @dev Slash amount equals minStake() at call time. Each affected aggregator
-    ///      emits an AggregatorSlashed event with the actual amount deducted.
+    /// @dev No submission (including committed but never revealed) is an S2
+    ///      liveness fault slashed at s2SlashFractionBps of minStake(); a CID
+    ///      that differs from the batch's finalCID is slashed the full
+    ///      minStake(). Each affected aggregator emits an AggregatorSlashed
+    ///      event with the actual amount deducted. See _slashBatch.
     /// @param _GI Current GI index.
     function slashAggregators(uint _GI) external onlyOwner onlyCurrentGI(_GI) {
         if (GIstate != GIstates.AuditorsSlashed)
@@ -1116,85 +1163,64 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
         // S2: partial fraction for liveness fault (no submission); BAD_CONSENSUS keeps full.
         uint256 s2Amount = (minStakeAmt * s2SlashFractionBps) / 10_000;
 
-        // 1. Tier 1 batches
         Tier1Batch[] storage t1batches = tier1Batches[_GI];
         for (uint i = 0; i < t1batches.length; i++) {
             Tier1Batch storage b = t1batches[i];
-            for (uint j = 0; j < b.aggregators.length; j++) {
-                address aggregator = b.aggregators[j];
-
-                bool submitted = t1Submitted[_GI][b.batchId][aggregator];
-                if (!submitted) {
-                    // S2 liveness fault: partial slash + S5/S6 tracking.
-                    // Skip when rounding reduces s2Amount to 0 — slashPartial
-                    // reverts InvalidSlashAmount on zero, bricking the GI.
-                    uint256 actualSlashed = s2Amount > 0
-                        ? dinvalidatorStakeContract.slashPartial(
-                            aggregator,
-                            s2Amount,
-                            "AGG_T1_NO_SUBMISSION",
-                            _GI
-                        )
-                        : 0;
-                    emit AggregatorSlashed(_GI, b.batchId, aggregator, "AGG_T1_NO_SUBMISSION", s2Amount, actualSlashed);
-                    // No S6 recordNoParticipation here: slashPartial above already
-                    // penalises this missed submission (S2, escalating to S5 on
-                    // repeat). Also firing S6 on the same event could slash more
-                    // than MIN_STAKE in one event (S2/S5 + S6 stacking).
-                } else {
-                    bytes32 cid = t1SubmissionCID[_GI][b.batchId][aggregator];
-                    if (cid != b.finalCID) {
-                        // BAD_CONSENSUS: full-severity slash (active incorrect submission).
-                        uint256 actualSlashed = dinvalidatorStakeContract.slash(
-                            aggregator,
-                            minStakeAmt,
-                            "AGG_T1_BAD_CONSENSUS"
-                        );
-                        emit AggregatorSlashed(_GI, b.batchId, aggregator, "AGG_T1_BAD_CONSENSUS", minStakeAmt, actualSlashed);
-                    }
-                }
-            }
+            _slashBatch(_GI, b.batchId, b.aggregators, b.finalCID, minStakeAmt, s2Amount, false);
         }
-
-        // 2. Tier 2 batches
         Tier2Batch[] storage t2batches = tier2Batches[_GI];
         for (uint i = 0; i < t2batches.length; i++) {
             Tier2Batch storage b = t2batches[i];
-            for (uint j = 0; j < b.aggregators.length; j++) {
-                address aggregator = b.aggregators[j];
-
-                bool submitted = t2Submitted[_GI][b.batchId][aggregator];
-                if (!submitted) {
-                    // S2 liveness fault: partial slash + S5/S6 tracking.
-                    // Skip when rounding reduces s2Amount to 0 (same guard as T1).
-                    uint256 actualSlashed = s2Amount > 0
-                        ? dinvalidatorStakeContract.slashPartial(
-                            aggregator,
-                            s2Amount,
-                            "AGG_T2_NO_SUBMISSION",
-                            _GI
-                        )
-                        : 0;
-                    emit AggregatorSlashed(_GI, b.batchId, aggregator, "AGG_T2_NO_SUBMISSION", s2Amount, actualSlashed);
-                    // No S6 recordNoParticipation here: same rationale as the T1
-                    // branch above (S2/S5 already covers this event; avoids
-                    // stacking past MIN_STAKE).
-                } else {
-                    bytes32 cid = t2SubmissionCID[_GI][b.batchId][aggregator];
-                    if (cid != b.finalCID) {
-                        // BAD_CONSENSUS: full-severity slash (active incorrect submission).
-                        uint256 actualSlashed = dinvalidatorStakeContract.slash(
-                            aggregator,
-                            minStakeAmt,
-                            "AGG_T2_BAD_CONSENSUS"
-                        );
-                        emit AggregatorSlashed(_GI, b.batchId, aggregator, "AGG_T2_BAD_CONSENSUS", minStakeAmt, actualSlashed);
-                    }
-                }
-            }
+            _slashBatch(_GI, b.batchId, b.aggregators, b.finalCID, minStakeAmt, s2Amount, true);
         }
 
         _setGIstate(GIstates.AggregatorsSlashed);
+    }
+
+    /// @dev Slashes one T1 or T2 batch's aggregators for slashAggregators
+    ///      (one body for both tiers keeps this contract under EIP-170, issue
+    ///      #201 Part A). No submission is an S2 liveness fault: partial slash
+    ///      plus S5/S6 tracking, skipped when rounding makes s2Amount 0
+    ///      (slashPartial reverts InvalidSlashAmount on zero, bricking the GI).
+    ///      No S6 recordNoParticipation here: slashPartial already penalises
+    ///      the missed submission, and also firing S6 could slash more than
+    ///      MIN_STAKE in one event. A submitted CID that differs from the
+    ///      batch's finalCID is BAD_CONSENSUS: full-severity slash.
+    function _slashBatch(
+        uint _GI,
+        uint batchId,
+        address[] storage aggs,
+        bytes32 finalCID,
+        uint256 minStakeAmt,
+        uint256 s2Amount,
+        bool t2
+    ) internal {
+        bytes32 noSubmission = "AGG_T1_NO_SUBMISSION";
+        bytes32 badConsensus = "AGG_T1_BAD_CONSENSUS";
+        if (t2) {
+            noSubmission = "AGG_T2_NO_SUBMISSION";
+            badConsensus = "AGG_T2_BAD_CONSENSUS";
+        }
+        for (uint j = 0; j < aggs.length; j++) {
+            address aggregator = aggs[j];
+            bool submitted = t2
+                ? t2Submitted[_GI][batchId][aggregator]
+                : t1Submitted[_GI][batchId][aggregator];
+            if (!submitted) {
+                uint256 actualSlashed = s2Amount > 0
+                    ? dinvalidatorStakeContract.slashPartial(aggregator, s2Amount, noSubmission, _GI)
+                    : 0;
+                emit AggregatorSlashed(_GI, batchId, aggregator, noSubmission, s2Amount, actualSlashed);
+            } else {
+                bytes32 cid = t2
+                    ? t2SubmissionCID[_GI][batchId][aggregator]
+                    : t1SubmissionCID[_GI][batchId][aggregator];
+                if (cid != finalCID) {
+                    uint256 actualSlashed = dinvalidatorStakeContract.slash(aggregator, minStakeAmt, badConsensus);
+                    emit AggregatorSlashed(_GI, batchId, aggregator, badConsensus, minStakeAmt, actualSlashed);
+                }
+            }
+        }
     }
 
     /// @notice Records the Tier-2 aggregation quality score for the current GI.
