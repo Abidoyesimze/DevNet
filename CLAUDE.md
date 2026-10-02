@@ -8,7 +8,7 @@ InfiniteZero / DIN Protocol DevNet: a federated-learning network coordinated by 
 
 The Solidity tree at `foundry/` (Foundry workflow) is the primary toolchain for building, testing, deploying, and verifying contracts, via `foundry/script/`. `hardhat/` remains in the tree as a complementary/secondary toolchain, not the primary path.
 
-Docs convention: `Documentation/` describes what exists in the code on `develop` (not the live Sepolia deployment) — `Documentation/public/` for network participants, `Documentation/technical/` for code readers. `Developer/` holds forward-looking material: `design/` (planned mechanism designs), `issues/` (backlog), `proposals/` (tooling proposals), `tasks/` (contributor task specs), `discussion/`, `rejected-ideas/`, plus ROADMAP.md and process docs. Placement rules: `Developer/README.md`.
+Docs convention: `Documentation/` describes what exists in the code on `develop` (not the live Sepolia deployment) — `Documentation/public/` for network participants, `Documentation/technical/` for code readers. `Developer/` holds forward-looking material: `design/` (planned mechanism designs), `issues/` (backlog), `proposals/` (tooling proposals), `tasks/` (contributor task specs), `tasks-plan/<github-user>/` (contributor task plans pending maintainer review, forwarded into `tasks/` once approved), `discussion/`, `rejected-ideas/`, plus ROADMAP.md and process docs. Placement rules: `Developer/README.md`.
 
 ## Commands
 

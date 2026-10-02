@@ -4,7 +4,7 @@
 **Author:** Umer Majeed (@umermjd11)
 **Reviewer:** @umeradl
 **Created:** 2026-10-02
-**Status:** Draft — pending review
+**Status:** Reviewed — amendments 1–8 from the [PR #209 review](https://github.com/InfiniteZeroFoundation/DevNet/pull/209) applied; reviewer decisions 1–4 pending
 **Proposed dates:** Oct 2 – Oct 12, 2026
 **Repo:** https://github.com/InfiniteZeroFoundation/DevNet
 **Base branch:** `develop` — plan written against commit `6ccc28c` (2026-09-30). Line numbers below are for that commit.
@@ -38,7 +38,7 @@ None of the six is implemented on `develop`:
 
 | Issue | State at `6ccc28c` |
 |---|---|
-| #201 A | `DINTaskCoordinator` is **24,585 B** runtime (−9 B under EIP-170), `DINTaskAuditor` is 22,567 B (+2,009 B), both measured from `foundry/out/*.json` `deployedBytecode`. `ci.yml` runs plain `forge build`/`forge test` (`:60-66`) with no size check. `foundry/anvil.sh:6` sets `--code-size-limit 4294967295` without saying why |
+| #201 A | `DINTaskCoordinator` is **24,585 B** runtime, **9 B over** EIP-170 (margin −9 B), `DINTaskAuditor` is 22,567 B (+2,009 B), both measured from `foundry/out/*.json` `deployedBytecode`. `ci.yml` runs plain `forge build`/`forge test` (`:60-66`) with no size check. `foundry/anvil.sh:6` sets `--code-size-limit 4294967295` without saying why |
 | #206 | `registerDINaggregator(uint _GI) public` (`DINTaskCoordinator.sol:397`) has no `onlyCurrentGI` (the modifier is at `:246`). The auditor side has it (`DINTaskAuditor.sol:660`) |
 | #192 | `revealAuditScore` checks `keccak256(abi.encodePacked(score, vote, salt))` (`DINTaskAuditor.sol:1160`). NatSpec at `:244`, `:1091`. dincli uses `Web3.solidity_keccak` (`dincli/cli/auditor.py:534`) |
 | #202 | `evaluate_lms` makes a fresh salt (`auditor.py:533`) and calls `_save_commit` unconditionally after the send (`:550`). `aggregate_t2` rebinds `bid` in the T1 loop (`aggregator.py:547`) after reading it from `getTier2Batch` (`:525`) |
@@ -68,25 +68,32 @@ Long-running drafts PR #31/#32 touch `DINTaskAuditor.sol` and `dincli/cli/audito
 
 ## Approach: shrink inside the same contract (no new contract, library, or deploy step)
 
-Prototyped against `6ccc28c` in a throwaway copy. All figures are runtime bytes, `via_ir`, `optimizer_runs = 200`:
+Prototyped against `6ccc28c` in a throwaway copy, then re-prototyped independently in review. All figures are runtime bytes, `via_ir`, `optimizer_runs = 200`. The two prototypes differ slightly, so the TP-1 PR reports every per-change and combined figure from **one** build of the actual implementation:
 
-| Lever | Saving | Use? |
-|---|---|---|
-| Fold `slashAggregators`' duplicated T1/T2 loops (`:1119-1195`) into one internal `_slashBatch(GI, batchId, aggregators, finalCID, minStake, s2Amount, bool t2)`. The `bytes32` reasons (`AGG_T1_NO_SUBMISSION` etc.), the events, and the S2/full-slash split stay the same | **−471 B** | ✅ |
-| Make the 10 per-aggregator getters `internal` (`t1`/`t2` × `SubmissionCID`, `Submitted`, `Votes`, `CommitHash`, `Committed`). Add one view: `getAggregatorSubmission(GI, TierKind, batchId, aggregator) → (committed, commitHash, submitted, cid, votes)` | **−355 B** | ✅ |
-| Make the `tier1Batches`/`tier2Batches` auto-getters `internal`. They duplicate `getTier1Batch`/`getTier2Batch`, which already exist | **−115 B** each | ✅ |
-| **Combined** | **23,542 B, margin 1,034 B**. With TP-2: 23,551 B, margin 1,025 B | |
-| Lower `optimizer_runs` to 100 / 50 / 1 | −20 / −38 / −76 B | ❌ Too small for the gas cost |
-| Fold T1/T2 `commit…`/`reveal…`/`finalize…` into shared internals (#201's first candidate) | **+166 to +177 B** (`via_ir` inlines the shared bodies) | ❌ |
-| External library or a second contract | Not needed | ❌ Adds linking/deploy steps for every model owner |
+| Lever | My prototype | Review prototype | Use? |
+|---|---|---|---|
+| Fold `slashAggregators`' duplicated T1/T2 loops (`:1119-1195`) into one internal `_slashBatch(GI, batchId, aggregators, finalCID, minStake, s2Amount, bool t2)`. The `bytes32` reasons (`AGG_T1_NO_SUBMISSION` etc.), the events, and the S2/full-slash split stay the same | −471 B | −515 B | ✅ |
+| Make the 10 per-aggregator getters `internal` (`t1`/`t2` × `SubmissionCID`, `Submitted`, `Votes`, `CommitHash`, `Committed`). Add one view: `getAggregatorSubmission(GI, TierKind, batchId, aggregator) → (committed, commitHash, submitted, cid, votes)` (see [`votes`](#getaggregatorsubmission-votes) below) | −355 B | −355 B | ✅ |
+| Make the `tier1Batches`/`tier2Batches` auto-getters `internal`. They duplicate `getTier1Batch`/`getTier2Batch`, which already exist | −115 B (one getter measured, not re-measured for both) | **−214 B for both** | ✅ |
+| **Combined** | 23,542 B, margin 1,034 B | **23,498 B, margin 1,078 B** | |
+| **Combined + TP-2** | 23,551 B, margin 1,025 B | **23,507 B, margin 1,069 B** | |
+| Lower `optimizer_runs` to 100 / 50 / 1 | −20 / −38 / −76 B | −20 / — / −76 B | ❌ Too small for the gas cost |
+| Fold T1/T2 `commit…`/`reveal…` into shared internals (#201's first candidate also names `start…AggregationReveal`, which I didn't prototype) | **+177 B** (`via_ir` inlines the shared bodies) | not prototyped | ❌ |
+| Fold T1/T2 `finalize…` into a shared `_tallyBatch` | **+166 B** | not prototyped | ❌ |
+| External library or a second contract | Not needed | — | ❌ Adds linking/deploy steps for every model owner |
 
 The trade-off is churn on **view** ABI only. No state-changing function, event, or storage slot changes:
 
 - **dincli:** 6 call sites move to `getAggregatorSubmission`: `dincli/cli/aggregator.py:213,265,322,532` and `dincli/cli/modelownerd/aggregation.py:109,154`.
-- **Foundry tests** that read the removed getters (`t1CommitHash`, `t1Submitted`, `tier1FinalizedAt`, …) switch to the new view.
-- **The subgraph (`feat/din-indexer`) doesn't `eth_call` any of these getters**; it only mentions them in docs. I'll post a note on PR #29 anyway.
+- **dincli tests:** `tests/test_aggregator_commit_retry.py:53` mocks `t1Committed`/`t2Committed` by name and moves to `getAggregatorSubmission` along with `aggregator.py:322,532`.
+- **Foundry tests** that read the removed getters switch to the new view: `AggregatorCommitReveal.t.sol:299,300,599,600` (`t1Submitted`, `t1SubmissionCID`). `TreasuryForwarding.t.sol:275` reads `tier1FinalizedAt` and changes only if the `FinalizedAt` candidate below is taken.
+- **The subgraph (PR #29) never calls a `DINTaskCoordinator` getter**; its mappings only `.bind()` `DINModelRegistry`. Only its bundled ABI JSON goes stale. I'll post a note on PR #29.
 
-**The margin is thin.** About 1,025 B after TP-2 meets a 1,024 B budget with almost nothing to spare. If the reviewer wants more, these are the next candidates (not measured yet). I'll report their sizes in the PR:
+### `getAggregatorSubmission` `votes`
+
+`t1Votes`/`t2Votes` are keyed by **CID**, not by aggregator (`DINTaskCoordinator.sol:66,85`). So `votes` is defined as the vote count for the aggregator's **own revealed CID** (`t1Votes[GI][batchId][cid]`), and 0 before a reveal. Looking up votes for an arbitrary CID is no longer possible. Nothing calls that today (see [Decision 4](#decisions-needed-from-the-reviewer)).
+
+**The margin is thin.** After TP-2 it's 1,025 B by my prototype (1 B over a 1,024 B budget) or 1,069 B by the review's (45 B over). The TP-1 PR restates it from its own build. If the reviewer wants more, these are the next candidates (not measured yet). I'll report their sizes in the PR:
 - fold `tier1FinalizedAt`/`tier2FinalizedAt` into a view
 - merge tier-duplicated custom errors (`TC_T1EmptyCommitHash`/`TC_T2EmptyCommitHash`, `…AlreadyCommitted`, `…NoCommitFound`, `…RevealHashMismatch`) where the tier is already implied by the function
 
@@ -129,14 +136,14 @@ The trade-off is churn on **view** ABI only. No state-changing function, event, 
 
 Implements the [approval review](https://github.com/InfiniteZeroFoundation/DevNet/issues/192#issuecomment-5878722560) amendments 1–6:
 
-1. **Contract:** `revealAuditScore` checks `keccak256(abi.encode(score, vote, salt, msg.sender, gi, batchId, modelIndex))`. Update the NatSpec at `:244`, `:1091` (and the formula's other mentions). The function signatures don't change.
+1. **Contract:** `revealAuditScore` checks `keccak256(abi.encode(score, vote, salt, msg.sender, gi, batchId, modelIndex))`. Update the formula in the NatSpec at `:244`, `:1080` (`commitAuditScore` `@dev`) and `:1091`. The function signatures don't change.
 2. **dincli:** add a helper `_audit_commit_hash(score, vote, salt, sender, gi, batch_id, model_index)` in `dincli/cli/auditor.py`, modelled on `_agg_commit_hash` (`dincli/cli/aggregator.py:65`), using `eth_abi.encode` + `Web3.keccak`. Use it at `:534`. `reveal_lms` is unchanged.
 3. **Tests:** put the formula in one shared foundry test helper. Change every test that reuses one `commitHash` across auditors to hash per auditor (the list is in amendment 3).
 4. **Regression tests** in `AuditorCommitReveal.t.sol`:
    - a copied hash plus a copied reveal reverts with `TA_RevealHashMismatch`
    - a hash built for model X doesn't reveal for model Y, another batch, or another GI
    - the honest path still finalizes
-5. **Docs:** `DINTaskAuditor.md`, `DINShared.md` (`TA_RevealHashMismatch`).
+5. **Docs:** `DINTaskAuditor.md:123,199` and `DINShared.md:216,401` (including `TA_RevealHashMismatch`).
 6. **Sizes:** `DINTaskAuditor` before/after (the TP-1 gate reports it once merged).
 
 **Estimate:** 2 days (most of it is test churn).
@@ -177,6 +184,7 @@ Implements the [approval review](https://github.com/InfiniteZeroFoundation/DevNe
   - a non-batch-auditor open reverts
   - rewrite `test_resolveDispute_upheld_returnsBondAndPenalises` / `_blocksFurtherOpen` (`EncryptedTestData.t.sol:319,341`), which currently encode the attack
 - **Docs:** remove the caveat in `DINTaskAuditor.md` §13 No. 1 and describe the new flow. Check for dincli commands that call these functions and update them if needed.
+- **Sizes:** `DINTaskAuditor` before/after in the PR. #201's acceptance covers both contracts, and TP-3 and TP-5 both grow the auditor.
 
 **Estimate:** 2 days.
 
@@ -194,10 +202,10 @@ Implements the [approval review](https://github.com/InfiniteZeroFoundation/DevNe
 
 ## Decisions needed from the reviewer
 
-1. **#201 budget:** is ≥ 1,024 B runtime margin confirmed? TP-1 meets it with ~10 B to spare after TP-2. If you want more headroom now, say so and TP-1 takes the extra candidates listed above.
+1. **#201 budget:** is ≥ 1,024 B runtime margin confirmed? After TP-2, TP-1 clears it by 1 B (my prototype, 1,025 B) to 45 B (review prototype, 1,069 B). The TP-1 PR restates this from its own build. If you want more headroom now, say so and TP-1 takes the extra candidates listed above.
 2. **TP-1 + TP-2:** one PR or two? Two keeps the size refactor reviewable on its own. One avoids a 9 B follow-up PR.
 3. **#205 design:** are options 1 + 2 accepted? What default `disputeBondAmount` value?
-4. **View ABI churn in TP-1:** is replacing 10 public getters with `getAggregatorSubmission` acceptable, given that dincli is the only off-chain caller?
+4. **View ABI churn in TP-1:** is replacing 10 public getters with `getAggregatorSubmission` acceptable? dincli is the only off-chain caller. Votes become readable only for an aggregator's own revealed CID, not for an arbitrary CID (unused today).
 
 ---
 
