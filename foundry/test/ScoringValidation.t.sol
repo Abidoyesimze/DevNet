@@ -18,6 +18,7 @@ import {DINModelRegistry} from "../src/DINModelRegistry.sol";
 import {DINTaskCoordinator} from "../src/DINTaskCoordinator.sol";
 import {DINTaskAuditor} from "../src/DINTaskAuditor.sol";
 import {GIstates} from "../src/DINShared.sol";
+import {auditCommitHash} from "./utils/AuditCommitHash.sol";
 
 contract ScoringValidationTest is Test {
     DinToken tokenImpl;
@@ -197,11 +198,8 @@ contract ScoringValidationTest is Test {
         uint256 score,
         bool vote
     ) internal {
-        bytes32 commitHash = keccak256(
-            abi.encodePacked(score, vote, TEST_SALT)
-        );
         vm.prank(auditor);
-        ta.commitAuditScore(gi, batchId, modelIndex, commitHash);
+        ta.commitAuditScore(gi, batchId, modelIndex, auditCommitHash(score, vote, TEST_SALT, auditor, gi, batchId, modelIndex));
     }
 
     function _revealScore(

@@ -213,7 +213,7 @@ Used by: `DINTaskCoordinator`
 | `TA_EmptyCommitHash` | `commitHash` argument is `bytes32(0)` |
 | `TA_RevealPhaseNotOpen` | `revealAuditScore` called while `GIstate != LMSevaluationRevealStarted` |
 | `TA_NoCommitFound` | No prior `commitAuditScore` recorded for this auditor/model — reveal without a commit |
-| `TA_RevealHashMismatch` | `keccak256(abi.encodePacked(score, vote, salt))` does not match the stored commit hash |
+| `TA_RevealHashMismatch` | `keccak256(abi.encode(score, vote, salt, auditor, gi, batchId, modelIndex))`, with `auditor` = `msg.sender`, does not match the stored commit hash |
 | `TC_RevealCannotBeStarted` | `startLMsubmissionsEvaluationReveal` called while `GIstate != LMSevaluationStarted` |
 | `TA_EncryptedKeyCountMismatch` | `assignAuditTestDataset`'s `encryptedKeys` array length does not match the batch's auditor count |
 
@@ -398,4 +398,4 @@ The `TA_` and `TC_` prefixes make it immediately clear in stack traces and event
 
 ### Commit-Then-Reveal Auditor Scoring
 
-`LMSevaluationStarted` and `LMSevaluationRevealStarted` split what was previously a single evaluation phase into two: auditors first commit `keccak256(score, vote, salt)` (hiding their vote from other auditors until everyone has committed), then, once the model owner closes the commit window via `DINTaskCoordinator.startLMsubmissionsEvaluationReveal`, reveal the underlying `(score, vote, salt)` for it to be counted. An auditor who commits but never reveals is simply excluded from quorum/median counting, and remains slashable via the existing "missed vote" check in `slashAuditors` — no separate non-reveal handling needed.
+`LMSevaluationStarted` and `LMSevaluationRevealStarted` split what was previously a single evaluation phase into two: auditors first commit `keccak256(abi.encode(score, vote, salt, auditor, gi, batchId, modelIndex))` (hiding their vote from other auditors until everyone has committed), then, once the model owner closes the commit window via `DINTaskCoordinator.startLMsubmissionsEvaluationReveal`, reveal the underlying `(score, vote, salt)` for it to be counted. An auditor who commits but never reveals is simply excluded from quorum/median counting, and remains slashable via the existing "missed vote" check in `slashAuditors` — no separate non-reveal handling needed.

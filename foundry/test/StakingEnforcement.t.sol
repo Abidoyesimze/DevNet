@@ -24,6 +24,7 @@ import {
     TA_StakeBelowModelFloor,
     TA_ConcurrentRegistrationCapReached
 } from "../src/DINShared.sol";
+import {auditCommitHash} from "./utils/AuditCommitHash.sol";
 
 contract StakingEnforcementTest is Test {
     DinToken token;
@@ -365,9 +366,8 @@ contract StakingEnforcementTest is Test {
         bytes32 salt = bytes32(uint256(0xC0FFEE));
         for (uint i = 0; i < batchAuditors.length; i++) {
             for (uint m = 0; m < modelIdxs.length; m++) {
-                bytes32 commitHash = keccak256(abi.encodePacked(uint256(80), true, salt));
                 vm.prank(batchAuditors[i]);
-                ta.commitAuditScore(1, 0, modelIdxs[m], commitHash);
+                ta.commitAuditScore(1, 0, modelIdxs[m], auditCommitHash(uint256(80), true, salt, batchAuditors[i], 1, 0, modelIdxs[m]));
             }
         }
 
