@@ -398,7 +398,7 @@ contract DINTaskCoordinator is Ownable, ReentrancyGuardTransient {
     /// @notice Registers the caller as an aggregator for the current GI.
     /// @dev Caller must be an active validator; duplicate registrations revert.
     /// @param _GI Current GI index.
-    function registerDINaggregator(uint _GI) public {
+    function registerDINaggregator(uint _GI) public onlyCurrentGI(_GI) {
         if (GIstate != GIstates.DINaggregatorsRegistrationStarted)
             revert TC_AggregatorsRegistrationNotOpen();
 

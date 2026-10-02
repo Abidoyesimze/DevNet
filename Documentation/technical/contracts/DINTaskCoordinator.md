@@ -155,7 +155,7 @@ The three reveal-opening calls (`startLMsubmissionsEvaluationReveal`, `startT1Ag
 Requires `_GI == GI + 1` and a funded reward pool: `dinTaskAuditorContract.giRewardPool(_GI) > 0`, otherwise `TC_GIRewardPoolNotFunded`. The two-argument overload also calls `updatePassScore`. Then `GI++`.
 
 ### 6.2 `registerDINaggregator`
-In `DINaggregatorsRegistrationStarted` only. There is no `onlyCurrentGI` modifier: the checks and the registration list use the `_GI` the caller passes. Checks in order: `isValidatorActive` (`TC_AggregatorNotActive`), not already registered, fewer than 300 registered (`TC_RegistrationCapReached`), stake ≥ `getModelStakeMin(modelId)` when non-zero (`TC_StakeBelowModelFloor`), and — when `maxConcurrentRegistrationsPerStakeUnit > 0` — `activeRegistrationCount < (stake / minStake) × cap` (`TC_ConcurrentRegistrationCapReached`). Then records the aggregator, calls `incrementActiveRegistration`, emits `DINValidatorRegistered`.
+In `DINaggregatorsRegistrationStarted` only, and `onlyCurrentGI`: `_GI` must be the current GI (`TC_WrongGI`), as for `DINTaskAuditor.registerDINAuditor` (issue #206). Checks in order: `isValidatorActive` (`TC_AggregatorNotActive`), not already registered, fewer than 300 registered (`TC_RegistrationCapReached`), stake ≥ `getModelStakeMin(modelId)` when non-zero (`TC_StakeBelowModelFloor`), and — when `maxConcurrentRegistrationsPerStakeUnit > 0` — `activeRegistrationCount < (stake / minStake) × cap` (`TC_ConcurrentRegistrationCapReached`). Then records the aggregator, calls `incrementActiveRegistration`, emits `DINValidatorRegistered`.
 
 ### 6.3 Batch-Assignment Seed Lock
 
@@ -280,7 +280,7 @@ Earlier findings from the [foundry/src security review](../audits/foundry-src-se
 - **No. 8 — Leftovers:** `networkFeeFloor` is stored but not enforced. `setTestDataAssignedFlag` gates nothing: evaluation can start without test data being assigned. `releaseGIRegistrationSlots` uses string `require` messages, unlike the rest of the contract.
 - **No. 9 — Not upgradeable:** a bug in a model's task contracts requires redeploying them and re-registering the model.
 - **No. 10 — dincli lags this contract:** `dincli model-owner deploy task-coordinator` still calls the older one-argument constructor (no `modelId`). `dincli aggregator aggregate-t2` names its working directory, worker job and container after the last T1 batch id, not the T2 batch id (issue #202, Part 2); the on-chain commit is unaffected.
-- **No. 11 — `registerDINaggregator` doesn't check the GI.** Unlike `DINTaskAuditor.registerDINAuditor`, it has no `onlyCurrentGI`: while any GI's registration window is open, a validator can register for a future GI (§6.2). Up to 300 addresses can fill GI N+1's list during GI N's window, which locks out honest registrants and hands the attacker every T1/T2 batch. Registering for an already-released past GI leaks the caller's own concurrent-registration slot. dincli always passes the current GI. Tracked in issue #206; the fix (add `onlyCurrentGI`) has to fit within the EIP-170 budget from No. 1.
+- **No. 11 — Fixed: `registerDINaggregator` now checks the GI.** It used to have no `onlyCurrentGI`, so during GI N's window a validator could register for GI N+1. Up to 300 addresses could fill that list, which locked out honest registrants and handed the attacker every T1/T2 batch. Registering for a released past GI also leaked the caller's own slot. Fixed by adding `onlyCurrentGI` (issue #206); it cost 9 bytes inside the No. 1 budget.
 
 ---
 
@@ -300,3 +300,4 @@ Earlier findings from the [foundry/src security review](../audits/foundry-src-se
 - Locked batch-assignment seeds for auditor and T1/T2 batches (`lockAuditSeed`, `lockAggSeed`; issue #156 H-2, PR #191).
 - Commit-then-reveal T1/T2 aggregation with a sender-bound commit hash (`commitT*Aggregation`, `revealT*Aggregation`, `startT*AggregationReveal`; issue #156 M-1, PR #197). Adds states `T1AggregationRevealStarted` (18) and `T2AggregationRevealStarted` (21), shifting later ordinals.
 - Back under EIP-170 (issue #201 Part A). The `slashAggregators` T1/T2 loops are folded into `_slashBatch`, with unchanged slashes and events. `tier1Batches` / `tier2Batches` and the ten `t1*`/`t2*` per-aggregator maps are now `internal`, and the new `getAggregatorSubmission` view replaces their getters. This is a view-ABI change; dincli and the bundled ABI were updated with it.
+- `registerDINaggregator` gains `onlyCurrentGI`: registering for any GI other than the current one reverts with `TC_WrongGI` (issue #206).
