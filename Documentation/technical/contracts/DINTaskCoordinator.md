@@ -59,13 +59,13 @@ Auditor registration, client submissions, scoring and rewards live in the paired
 | `isTier1Aggregator`, `isTier2Aggregator` | Batch assignment flags (not public) |
 | `t1CommitHash`, `t1Committed` (and `t2*`) | Commit hash and commit flag per `[gi][batchId][aggregator]` |
 | `t1SubmissionCID`, `t1Submitted`, `t1Votes` (and `t2*`) | Revealed CID, revealed flag and per-CID vote count. Written only by the reveal functions; `t*Submitted` stays `false` for an aggregator who committed but never revealed |
-
-The batch arrays and the ten `t1*`/`t2*` maps are `internal`, to keep the contract under EIP-170 (issue #201 Part A). Read per-aggregator state through `getAggregatorSubmission(gi, tier, batchId, aggregator)`, which returns `(committed, commitHash, submitted, cid, votes)`. `votes` is the vote count of that aggregator's own revealed CID, because the vote maps are keyed by CID. It is 0 before the reveal. A vote count for an arbitrary CID is no longer readable from outside the contract.
 | `tier1FinalizedAt`, `tier2FinalizedAt` | Finalization timestamps (dispute window start) |
 | `tier2Score[gi]` | Owner-recorded quality score for the T2 model |
 | `aggregatorWeight[gi][addr]`, `totalAggregatorWeight[gi]` | Reward weights (one unit per aggregator per finalized batch) |
 | `auditSeedBlock[gi]`, `auditSeed[gi]` | Anchor block and locked seed for auditor batch assignment (§6.3) |
 | `aggSeedBlock[gi]`, `aggSeed[gi]` | Anchor block and locked seed for T1/T2 batch assignment (§6.3) |
+
+The batch arrays and the ten `t1*`/`t2*` maps are `internal`, to keep the contract under EIP-170 (issue #201 Part A). Read per-aggregator state through `getAggregatorSubmission(gi, tier, batchId, aggregator)`, which returns `(committed, commitHash, submitted, cid, votes)`. `votes` is the vote count of that aggregator's own revealed CID, because the vote maps are keyed by CID. It is 0 before the reveal. A vote count for an arbitrary CID is no longer readable from outside the contract.
 
 ### 3.3 Constants
 
