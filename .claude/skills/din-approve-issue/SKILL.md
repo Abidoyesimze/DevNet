@@ -155,11 +155,14 @@ code spans or URLs.
 ## 7. Post and label (after Umer's go-ahead)
 
 ```bash
-gh issue comment <N> --repo InfiniteZeroFoundation/DevNet -F body=@<draft>   # or: gh api repos/.../issues/<N>/comments -F body=@<draft>
+gh api repos/InfiniteZeroFoundation/DevNet/issues/<N>/comments -F body=@<draft> --jq .html_url
 gh api repos/InfiniteZeroFoundation/DevNet/issues/<N>/comments --jq '.[-1] | {html_url, user: .user.login, body_start: .body[:80]}'
 ```
 
+Post through `gh api`, not `gh issue comment`: for `gh issue comment`, `-F`
+means `--body-file <path>`, so `-F body=@<draft>` fails and posts nothing.
 Confirm `user` is `umeradl` and the body starts with `## Approval review`.
+Add the label only after that check passes.
 
 For **Approved** / **Approved with amendments**, add the label:
 
