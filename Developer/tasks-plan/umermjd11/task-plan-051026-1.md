@@ -60,6 +60,8 @@ While writing the [DevNet 2.0 wiki](https://github.com/InfiniteZeroFoundation/De
 | TP-5 | New dincli commands (`model-owner rewards …`, `rewards claim`, `auditor register-encryption-key`, dispute commands), `dincli/abis/DinEmission.json`, context helper, tests, role docs | TP-1 (getter set), TP-4 | After TP-1 merges (it reads `giRewardSnapshot`/`testDataDisputes`/`rewardClaimed`) |
 | TP-6 | `Documentation/public/**`, `ROADMAP.md:19` | TP-4/TP-5 (new commands to document) | Last. Covers the new commands too |
 
+**PR #218** (`P3Adversarial.t.sol`, #154 Part 2) is open and encodes Row 6 (#180) and Row 11 (#193) as `test_knownGap_…`. If it merges first, TP-2 and TP-3 each flip their row's test to `test_defended_…` in the same PR. If TP-2/TP-3 merge first, PR #218 rebases and flips them. Either way, no test is left asserting a closed gap.
+
 One PR per TP, or TP-1 + TP-2 as two commits in one PR. Rebase on `develop` after each merge, with no stacked branches. PR #31/#32 (`dincli/sdk`, daemon) rebase onto these changes.
 
 ---
@@ -228,7 +230,7 @@ These are the `Documentation/public/` lines that no longer match `develop` (list
 | [#201](https://github.com/InfiniteZeroFoundation/DevNet/issues/201) Part B | Mechanism decision (the slash reason for committed-but-unrevealed), tied to #155 / #38 |
 | [#194](https://github.com/InfiniteZeroFoundation/DevNet/issues/194) | Needs a design note first (refund path, CID repair) |
 | [#78](https://github.com/InfiniteZeroFoundation/DevNet/issues/78) | Two decisions open: where the network-fee floor is enforced, and which gas-price input to use |
-| [#154](https://github.com/InfiniteZeroFoundation/DevNet/issues/154) Part 2 | Owned through [task_240926_17](../../tasks/task_240926_17.md) Part 2 (`P3Adversarial.t.sol`). TP-2/TP-3 change Row 6/11 outcomes, so its tests should be written against the result |
+| [#154](https://github.com/InfiniteZeroFoundation/DevNet/issues/154) Part 2 | Owned through [task_240926_17](../../tasks/task_240926_17.md) Part 2: `P3Adversarial.t.sol` is open as [PR #218](https://github.com/InfiniteZeroFoundation/DevNet/pull/218). TP-2 and TP-3 flip its Row 6 and Row 11 tests (see [Sequencing](#sequencing)) |
 | [#181](https://github.com/InfiniteZeroFoundation/DevNet/issues/181), [#178](https://github.com/InfiniteZeroFoundation/DevNet/issues/178) | Mainnet-grade (decentralized adjudication, VRF) |
 | [#185](https://github.com/InfiniteZeroFoundation/DevNet/issues/185), #166, #167 | Long-run / umbrella |
 | #155, #157, #158, #174, #42, #43, #24, #21, #20, #23, #75 | Assigned to others, deferred, or non-code |
