@@ -2696,6 +2696,11 @@
     },
     {
       "type": "error",
+      "name": "TA_RewardsAlreadySettled",
+      "inputs": []
+    },
+    {
+      "type": "error",
       "name": "TA_RewardsNotSettled",
       "inputs": []
     },

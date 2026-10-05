@@ -162,14 +162,14 @@ Lets a batch auditor challenge the model owner's test data.
 | Step | Who | Effect |
 |------|-----|--------|
 | `isEncryptionKeyEmpty(gi, batchId, auditor)` | View | Free check: an auditor who received no key has grounds to dispute |
-| `openTestDataDispute(gi, batchId)` | An auditor of that batch (`TA_NotAssignedAuditor` otherwise) | Needs a stored commitment; pulls `disputeBondAmount` DIN (100 DIN by default); window = `disputeWindowBlocks` |
-| `resolveTestDataDispute(gi, batchId, K, plaintextHash)` | Owner, within the window | The owner reveals `K` and the plaintext hash, and the commitment is recomputed. **Match →** dispute false: bond forfeited. **Mismatch →** upheld: bond returned; `disputePenaltyBps` of `giRewardPool[gi]` removed as a penalty; batch marked `pendingReassignment` |
+| `openTestDataDispute(gi, batchId)` | An auditor of that batch (`TA_NotAssignedAuditor` otherwise) | Needs a stored commitment and an unsettled GI (`TA_RewardsAlreadySettled` once `settleRewards` has run); pulls `disputeBondAmount` DIN (100 DIN by default); window = `disputeWindowBlocks` |
+| `resolveTestDataDispute(gi, batchId, K, plaintextHash)` | Owner, within the window | The owner reveals `K` and the plaintext hash, and the commitment is recomputed. **Match →** dispute false: bond forfeited. **Mismatch →** upheld: bond returned; `disputePenaltyBps` of `giRewardPool[gi]` removed as a penalty (no penalty if the GI settled while the dispute was open); batch marked `pendingReassignment` |
 | `closeExpiredDispute(gi, batchId)` | Anyone, after the window | The owner didn't answer, so the dispute is **upheld** with the same effects as a mismatch. Emits `DisputeExpired(gi, batchId)`, then `TestDataDisputeUpheld` |
 | `reassignAuditTestDataset(…)` | Owner | New CID, keys and commitment for a batch pending reassignment |
 
 Forfeited bonds and penalties are split 50% burned / 50% forwarded to `slashTreasury()`; both halves are burned if no treasury is set. `treasuryAccrued` is a running counter of everything routed out this way (including the burned part). No tokens are held against it.
 
-The dispute is not bound to the caller (anyone can open one), and any caller can trigger the "upheld" branch with a wrong `K` (§13 No. 1).
+Claims pay from `giRewardSnapshot[gi]`, which `settleRewards` fixes. A pool penalty after settlement would take tokens claimants are already owed, so disputes can't be opened on a settled GI, and a dispute upheld after settlement returns the bond and flags the batch but takes no penalty. For who can open and resolve, see §13 No. 1.
 
 ---
 
@@ -220,4 +220,4 @@ Read alongside the [foundry/src security review](../audits/foundry-src-security-
 - Treasury shares and forfeitures forwarded to the platform treasury (`slashTreasury()`), replacing the per-contract treasury address (issue No. 152).
 - `createAuditorsBatches` takes the coordinator's locked audit seed (issue No. 156 H-2, PR No. 191).
 - The audit commit hash binds the auditor and the slot: `keccak256(abi.encode(score, vote, salt, msg.sender, gi, batchId, modelIndex))` replaces `keccak256(abi.encodePacked(score, vote, salt))` (issue No. 192). Function signatures and the ABI are unchanged; in-flight commits made under the old formula can't be revealed after the switch.
-- Test-data disputes (issue No. 205): only an auditor of the batch can open one; `resolveTestDataDispute` is owner-only; `closeExpiredDispute` now upholds an unanswered dispute instead of forfeiting the bond; `disputeBondAmount` defaults to 100 DIN. `DisputeExpired` drops its `bondForfeited` field.
+- Test-data disputes (issue No. 205): only an auditor of the batch can open one; `resolveTestDataDispute` is owner-only; `closeExpiredDispute` now upholds an unanswered dispute instead of forfeiting the bond; `disputeBondAmount` defaults to 100 DIN. `DisputeExpired` drops its `bondForfeited` field. Disputes can't be opened once the GI is settled (`TA_RewardsAlreadySettled`), and one upheld after settlement takes no pool penalty, so settled claims stay funded (PR No. 215 review).

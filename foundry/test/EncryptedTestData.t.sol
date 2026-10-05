@@ -13,7 +13,9 @@ pragma solidity ^0.8.28;
 //                    pendingReassignment set
 //   Stale-round binding — same K+plaintext but different gi/batchId → upheld
 //   Window expiry — resolveTestDataDispute after window reverts;
-//                   closeExpiredDispute forfeits bond
+//                   closeExpiredDispute upholds (owner silence, issue #205)
+//   Settlement    — no dispute opens on a settled GI, and an upheld dispute
+//                   takes no pool penalty once the GI is settled
 //   Reassignment  — reassignAuditTestDataset clears pendingReassignment; reverts
 //                   without prior upheld dispute
 //
@@ -29,7 +31,7 @@ import {DinValidatorStake} from "../src/DinValidatorStake.sol";
 import {DINModelRegistry} from "../src/DINModelRegistry.sol";
 import {DINTaskCoordinator} from "../src/DINTaskCoordinator.sol";
 import {DINTaskAuditor} from "../src/DINTaskAuditor.sol";
-import {GIstates, TA_NoCommitmentStored, TA_DisputeAlreadyActive, TA_NoActiveDispute, TA_DisputeWindowClosed, TA_NotAssignedAuditor} from "../src/DINShared.sol";
+import {GIstates, TA_NoCommitmentStored, TA_DisputeAlreadyActive, TA_NoActiveDispute, TA_DisputeWindowClosed, TA_NotAssignedAuditor, TA_RewardsAlreadySettled} from "../src/DINShared.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 contract EncryptedTestDataTest is Test {
@@ -506,6 +508,57 @@ contract EncryptedTestDataTest is Test {
 
         assertEq(ta.giRewardPool(1), poolBefore, "pool untouched");
         assertFalse(_disputePending(1, 0), "batch not blocked");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Settled GI: claims pay from giRewardSnapshot, so a giRewardPool penalty
+    // taken after settleRewards would underfund them (PR No. 215 review).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// @dev Sum of the snapshot pools claimants of `gi` are owed.
+    function _snapshotOwed(uint256 gi) internal view returns (uint256) {
+        (uint256 clientPool, uint256 auditorPool, uint256 aggregatorPool,,) = ta.giRewardSnapshot(gi);
+        return clientPool + auditorPool + aggregatorPool;
+    }
+
+    function test_openDispute_afterSettle_reverts() public {
+        _runToAuditorBatchesCreated();
+        _assignBatch0();
+        vm.prank(address(tc));
+        ta.settleRewards(1, 0);
+        _fundDin(disputer, BOND + 10 ether);
+
+        vm.prank(disputer);
+        vm.expectRevert(TA_RewardsAlreadySettled.selector);
+        ta.openTestDataDispute(1, 0);
+    }
+
+    /// @dev A dispute opened before settlement and upheld after it (owner
+    ///      silent) returns the bond and flags the batch, but takes no penalty,
+    ///      so the contract still holds everything the snapshot owes.
+    function test_upheldAfterSettle_skipsPenalty() public {
+        _runToAuditorBatchesCreated();
+        _assignBatch0();
+        vm.prank(modelOwner);
+        ta.setDisputeBondAmount(BOND);
+        _openDispute(disputer);
+
+        vm.prank(address(tc));
+        ta.settleRewards(1, 0);
+        uint256 owed = _snapshotOwed(1);
+        assertGt(owed, 0, "snapshot owes claimants");
+        uint256 poolBefore     = ta.giRewardPool(1);
+        uint256 disputerBefore = token.balanceOf(disputer);
+
+        vm.roll(_disputeExpires(1, 0) + 1);
+        vm.expectEmit(true, true, true, true, address(ta));
+        emit DINTaskAuditor.TestDataDisputeUpheld(1, 0, disputer, BOND, 0);
+        ta.closeExpiredDispute(1, 0);
+
+        assertEq(token.balanceOf(disputer), disputerBefore + BOND, "bond returned to disputer");
+        assertEq(ta.giRewardPool(1), poolBefore, "no penalty after settlement");
+        assertGe(token.balanceOf(address(ta)), owed, "claims stay fully funded");
+        assertTrue(_disputePending(1, 0), "batch still flagged for reassignment");
     }
 
     // ─────────────────────────────────────────────────────────────────────────

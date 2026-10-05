@@ -287,7 +287,7 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
     // matches DINTaskCoordinator.disputeBond. Revisit with issue #155's values.
     uint256 public disputeBondAmount = 100 * 1e18; // DIN; owner-settable
     uint256 public disputeWindowBlocks = 7200;  // ~1 day on Optimism (~2s blocks)
-    uint256 public disputePenaltyBps = 2500;    // 25% of giRewardPool[gi] forfeited on owner loss
+    uint256 public disputePenaltyBps = 2500;    // 25% of giRewardPool[gi] forfeited on owner loss (none once the GI is settled)
 
     modifier onlyAssignedAuditor(
         uint256 gi,
@@ -1473,6 +1473,8 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
     ///         can call closeExpiredDispute and the dispute is upheld.
     /// @dev Issue #205: opening was unrestricted and the bond defaulted to 0,
     ///      so any address could drain giRewardPool through repeated disputes.
+    ///      Reverts once the GI's rewards are settled: claims then pay from
+    ///      giRewardSnapshot, so a giRewardPool penalty would underfund them.
     /// @param gi GI index.
     /// @param batchId Batch to dispute.
     function openTestDataDispute(
@@ -1481,6 +1483,7 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
     ) external nonReentrant {
         if (batchId >= auditBatches[gi].length) revert TA_BatchDoesNotExist();
         if (!isBatchAuditor[gi][batchId][msg.sender]) revert TA_NotAssignedAuditor();
+        if (giRewardSnapshot[gi].settled) revert TA_RewardsAlreadySettled();
         if (testDataCommitments[gi][batchId] == bytes32(0)) revert TA_NoCommitmentStored();
         DisputeRecord storage d = testDataDisputes[gi][batchId];
         if (d.active) revert TA_DisputeAlreadyActive();
@@ -1562,7 +1565,9 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
 
     /// @dev Upheld test-data dispute: return the bond, penalise the owner's GI
     ///      reward pool by disputePenaltyBps, and block the batch until
-    ///      reassignAuditTestDataset.
+    ///      reassignAuditTestDataset. No penalty if the GI settled while the
+    ///      dispute was open: settleRewards has already split giRewardPool
+    ///      into giRewardSnapshot, which claims pay from.
     function _upholdTestDataDispute(uint256 gi, uint256 batchId, DisputeRecord storage d) internal {
         uint256 bond = d.bond;
         address disputer = d.disputer;
@@ -1573,7 +1578,9 @@ contract DINTaskAuditor is Ownable, ReentrancyGuardTransient {
             dinToken.safeTransfer(disputer, bond);
         }
 
-        uint256 penalty = (giRewardPool[gi] * disputePenaltyBps) / 10000;
+        uint256 penalty = giRewardSnapshot[gi].settled
+            ? 0
+            : (giRewardPool[gi] * disputePenaltyBps) / 10000;
         if (penalty > 0 && giRewardPool[gi] >= penalty) {
             giRewardPool[gi] -= penalty;
             _burnAndForward(penalty);

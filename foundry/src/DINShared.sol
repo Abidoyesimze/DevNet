@@ -360,6 +360,10 @@ error TA_NoRewardsToClaim();
 error TA_InvalidRewardGI();
 /// @dev claimReward was called for a GI whose rewards have not been settled yet.
 error TA_RewardsNotSettled();
+/// @dev openTestDataDispute was called for a GI whose rewards are already
+///      settled; claims pay from the snapshot, so a pool penalty could no
+///      longer be taken without underfunding them.
+error TA_RewardsAlreadySettled();
 /// @dev Caller already claimed their reward for this GI.
 error TA_RewardAlreadyClaimed();
 /// @dev Caller earned no reward for this GI (not a participant, or scored zero).
