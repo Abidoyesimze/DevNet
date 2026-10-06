@@ -28,7 +28,7 @@ The dincli, integration-suite and docs items this plan first carried (BL-27/BL-2
 | # | Issue | Area | Why now |
 |---|---|---|---|
 | TP-1 | [#201](https://github.com/InfiniteZeroFoundation/DevNet/issues/201) Part A, item 4 | `DINTaskAuditor` size review | Left open in the [#201 status update](https://github.com/InfiniteZeroFoundation/DevNet/issues/201). `DINTaskAuditor` is at 22,718 B (1,858 B margin), so the gate warns on every PR, and TP-2 and later mechanism work add more bytes |
-| TP-2 | [#180](https://github.com/InfiniteZeroFoundation/DevNet/issues/180) | Dual-role registration (auditor + aggregator, same GI) | The decision is all that's missing. Prototype: guard +103 B. Also carries the amendment-4 NatSpec fix |
+| TP-2 | [#180](https://github.com/InfiniteZeroFoundation/DevNet/issues/180) | Dual-role registration (auditor + aggregator, same GI) | The decision is all that's missing. Prototype: guard +102 B. Also carries the amendment-4 NatSpec fix |
 | TP-3 | [#193](https://github.com/InfiniteZeroFoundation/DevNet/issues/193) | S5 recidivism per slasher contract | `DinValidatorStake` has about 14 KB headroom. Needs an option choice ([Decision 3](#reviewer-decisions)). The fix fits the existing storage gap |
 
 ---
@@ -104,10 +104,10 @@ Whichever task lands second reports the combined size.
 
 # TP-2 — #180: one address can't hold both roles in a GI
 
-**Recommendation: a per-address cross-role guard** ([Decision 2](#reviewer-decisions)). The guard is Sybil-bypassable (a second address with its own stake), which the threat model already notes. But it forces the attacker to put up a second stake and makes the attack visible on-chain, for +103 B. Documenting stake cost as the only defence would also need a non-zero `maxConcurrentRegistrationsPerStakeUnit` default. That is a tokenomics call belonging to #155, so I'd rather not tie this fix to it.
+**Recommendation: a per-address cross-role guard** ([Decision 2](#reviewer-decisions)). The guard is Sybil-bypassable (a second address with its own stake), which the threat model already notes. But it forces the attacker to put up a second stake and makes the attack visible on-chain, for +102 B. Documenting stake cost as the only defence would also need a non-zero `maxConcurrentRegistrationsPerStakeUnit` default. That is a tokenomics call belonging to #155, so I'd rather not tie this fix to it.
 
 - **Where the guard goes.** Aggregator registration (states 6–7) always comes **before** auditor registration (8–9) (`DINShared.sol:17-20`). So the guard belongs in `registerDINAuditor`: `if (dintaskcoordinatorContract.isDINAggregator(_GI, msg.sender)) revert TA_DualRoleNotAllowed();`. It needs `isDINAggregator(uint256,address)` added to `IDINTaskCoordinator`, and the coordinator's public mapping `isDINAggregator` (`DINTaskCoordinator.sol:34`) already provides it. A coordinator-side guard would never fire, because no auditor exists yet when aggregators register.
-- **Prototype cost:** `DINTaskAuditor` goes from 22,718 to 22,821 B (+103 B). The coordinator is unchanged.
+- **Prototype cost:** `DINTaskAuditor` goes from 22,718 to 22,820 B (+102 B). The coordinator is unchanged.
 - **NatSpec (amendment 4):** fix `DinValidatorStake.sol:451` and `:462` ("not yet enforced"), and the "decremented at endGI time" note at `:121` (the decrement happens in `releaseGIRegistrationSlots`).
 - **Tests** (next to the `StakingEnforcement.t.sol` registration tests):
   - An aggregator registering as an auditor in the same GI reverts.
