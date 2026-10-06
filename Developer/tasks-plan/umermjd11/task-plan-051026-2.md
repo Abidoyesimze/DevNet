@@ -4,7 +4,7 @@
 **Author:** Umer Majeed (@umermjd11)
 **Reviewer:** @umeradl
 **Created:** 2026-10-05
-**Status:** Pending review
+**Status:** Approved in PR #229 with [review amendments 1–6](https://github.com/InfiniteZeroFoundation/DevNet/pull/229#issuecomment-6000550646) and [reviewer decisions 1–4](https://github.com/InfiniteZeroFoundation/DevNet/pull/229#issuecomment-6000552418) (recommended options accepted). Forwarded 2026-10-06 → [task_061026_21](https://github.com/InfiniteZeroFoundation/DevNet/blob/develop/Developer/tasks/task_061026_21.md) (forwarding PR, linked on this PR)
 **Proposed dates:** Oct 6 – Oct 17, 2026
 **Repo:** https://github.com/InfiniteZeroFoundation/DevNet
 **Base branch:** `develop`, written against commit `a1fcce2` (2026-10-05). The task contracts, dincli and `tests/dincli/` are unchanged since `740a613`, where the audit below was done. Line numbers are for that tree.
@@ -35,15 +35,15 @@ Read-only audit at `740a613`:
   - **Hardhat task contracts.** `constants.py:50` sets `ARTIFACT_BASE = hardhat/artifacts/contracts`, so the suite deploys the **hardhat** task contracts. Those are the pre-foundry versions:
     - no commit-reveal, rewards, seed lock or encrypted test data;
     - a 23-member `GIstates` enum (`hardhat/contracts/DINShared.sol:10-34`), while dincli mirrors foundry's 26 (`dincli/cli/utils.py:640`, `:669`).
-  - **Tracked ABIs overwritten.** `dump-abi --official` (`test_01:167-197`, `test_02:74-107`) overwrites the tracked foundry ABIs in `dincli/abis/` with hardhat ABIs.
+  - **Tracked ABIs overwritten.** `dump-abi --official` (`test_01_platform.py:167-197`, `test_02_task_contracts.py:74-107`) overwrites the tracked foundry ABIs in `dincli/abis/` with hardhat ABIs.
   - **Steps missing from `test_04_gi.py`:**
     - funding the reward pool;
     - registering auditor encryption keys;
     - all three reveal phases;
     - `T2 set-score`, release slots and claims.
-  - **Wrong final state.** It asserts `GIended` as "23" (`:478`); the real ordinal is 25.
+  - **Stale final-state fallback.** `test_04_gi.py:478` passes on the name (`"GIended" in result.stdout or "23" in result.stdout`). The stale piece is the `or "23"` fallback (and the "index 23" docstring); the real ordinal is 25.
 - **dincli can't drive a full GI on the foundry contracts.**
-  - **`model-owner deploy`** sends the old constructors (`deploy.py:35`, `:77`; BL-27) and never calls `setDinToken`.
+  - **`model-owner deploy`** sends the old constructors (`deploy.py:35`, `:77`; BL-27, issue [#223](https://github.com/InfiniteZeroFoundation/DevNet/issues/223)) and never calls `setDinToken`.
   - **No dincli command for:**
     - `depositRewards` / `DinEmission.fundGI`, so `gi start` reverts with `TC_GIRewardPoolNotFunded`;
     - `registerEncryptionKey`, so `create-testdataset --submit` fails. The error at `auditor.py:39` even names a nonexistent `dincli auditor register-encryption-key`;
@@ -56,6 +56,17 @@ Read-only audit at `740a613`:
   - **Aggregation seed:** waiting, or locked.
 - **CI never runs the suite** (`ci.yml:136-137` runs `-m "not integration"`). That follow-up is [#228](https://github.com/InfiniteZeroFoundation/DevNet/issues/228) and isn't part of this plan.
 - **The public GI docs are stale**: wrong command names and missing funding/key/seed/reveal steps (see TP-5).
+
+**Discussion #216 follow-ups.** [Discussion #216](https://github.com/InfiniteZeroFoundation/DevNet/discussions/216#discussioncomment-18761447) closed task_021026_19 and left these follow-ups. All of them are covered here:
+
+| Follow-up | TP |
+|---|---|
+| `model-owner deploy` still uses the old constructors (no `modelId`) | TP-3 (closes [#223](https://github.com/InfiniteZeroFoundation/DevNet/issues/223) with BL-28) |
+| No dincli commands for depositing/claiming rewards, `registerEncryptionKey` or disputes | TP-3 |
+| `din-workflow.md` still lists 4 contracts and `withdraw` | TP-5 |
+| Old command names in `roles/clients.md`, `roles/auditors.md`, `roles/model-owner.md`, `model-workflow.md` | TP-5 |
+| `setup.md`'s broken `@main#subdirectory=dist` install line | TP-5 |
+| `ROADMAP.md:19` (deploy-blocker sentence, wrong since PR #211) | TP-5 |
 
 The Parts run in this order: **check the contracts → update dincli → make the suite run a complete GI → update the docs.**
 
@@ -118,8 +129,10 @@ With more states, `dincli task gi show-state` (and the subgraph, and any dashboa
 | New state | Inserted | Set by | Gate change |
 |---|---|---|---|
 | `AuditSeedLocked` | between `LMSclosed` and `AuditorsBatchesCreated` | `lockAuditSeed` (`DINTaskCoordinator.sol:1483`; anyone). Only on a successful lock, not on a re-anchor | `createAuditorsBatches` requires `AuditSeedLocked` instead of `LMSclosed` plus a non-zero seed |
-| `AuditTestDataAssigned` | between `AuditorsBatchesCreated` and `LMSevaluationStarted` | `setTestDataAssignedFlag(gi, true)` (`:519`) | `startLMsubmissionsEvaluation` requires it, which **closes the gap** that evaluation could start without test data. Decide whether `flag=false` stays possible (it would move back to `AuditorsBatchesCreated`) or the call becomes one-way |
+| `AuditTestDataAssigned` | between `AuditorsBatchesCreated` and `LMSevaluationStarted` | `setTestDataAssignedFlag(gi, true)` (`:519`) | `startLMsubmissionsEvaluation` requires it. To **close the gap**, the auditor side of `setTestDataAssignedFlag` (`DINTaskAuditor.sol:1017-1029`) also checks that **every batch** of the GI has a stored commitment (`testDataCommitments[gi][b] != 0`, written by `assignAuditTestDataset`) and otherwise reverts with a new `TA_TestDataNotAssigned`. Without that check the flag is only the owner's own claim. The flag is already one-way (`TA_FlagMustBeTrue`, `TA_FlagAlreadySet`) |
 | `AggSeedLocked` | between `LMSevaluationClosed` and `T1nT2Bcreated` | `lockAggSeed` (`:1459`) | `autoCreateTier1AndTier2` requires `AggSeedLocked` |
+
+**Priority if the coordinator budget runs short** (Decision 1, option B): `AuditTestDataAssigned` first, because it closes a real gap, then `AuditSeedLocked`, then `AggSeedLocked`. The table above is in lifecycle order, which is also the enum insertion order.
 
 **Considered, not recommended** (listed for the reviewer):
 - **A "reward pool funded" state.** Funding happens on the auditor contract, anyone can do it, and it targets the *next* GI, so it doesn't fit the coordinator's per-GI state. A `isGIFunded(gi)` view, or the existing `giRewardPool(gi)` getter that dincli reads, covers it.
@@ -138,13 +151,14 @@ The review may add others. TP-1 lists every step that changes no state.
   - foundry tests that assert ordinals or names;
   - bundled ABIs (`dump-abi --official`).
 - **Post the new ordinal table on PR #29** (the subgraph regenerates its `GIstates` mapping). Don't push to that branch.
-- **Size.** `DINTaskCoordinator` has a 1,079 B margin. Measure each state on its own and together. If they don't all fit with the CI gate green, keep the ones that fit (in table order) and replace the rest with views, then report it in the PR.
+- **Size.** `DINTaskCoordinator` has a 1,079 B margin. Measure each state on its own and together. If they don't all fit with the CI gate green, keep them in priority order (above) and replace the rest with views, then report it in the PR. The commitment check costs **`DINTaskAuditor` +75 B** (measured on `a1fcce2`). Together with task_061026_20's TP-1 + TP-2, the auditor comes to 22,575 B (2,001 B margin, warn band). task_061026_20 has the shared budget table and the ways back out of the warn band: the fold review, and dropping `Is_testdataCIDs_Assigned` once this state guards the double-set.
 - **`lockAuditSeed` / `lockAggSeed` stay permissionless.** The state change happens inside the existing lock path, after the seed is stored.
 
 **Tests:**
 - Each transition happens.
 - `createAuditorsBatches` / `autoCreateTier1AndTier2` revert before the lock.
 - `startLMsubmissionsEvaluation` reverts until test data is assigned (a new regression test for the gap).
+- With one batch's test data unassigned, `setTestDataAssignedFlag` reverts with `TA_TestDataNotAssigned`, and evaluation can't start.
 - A re-anchor leaves the state unchanged.
 - The full lifecycle test walks every ordinal.
 
@@ -154,12 +168,12 @@ The review may add others. TP-1 lists every step that changes no state.
 
 # TP-3 — dincli commands for a complete GI
 
-**Deploy (BL-27).**
+**Deploy (BL-27). TP-3 closes issue [#223](https://github.com/InfiniteZeroFoundation/DevNet/issues/223)** (BL-27 + BL-28).
 - `model-owner deploy task-coordinator` / `task-auditor` get `--model-id`. The default is `DINModelRegistry.totalModels()`, the ID the next approval assigns (`DINModelRegistry.sol:237`), with a warning that the guess only holds if no other request is approved first.
 - The auditor deploy reads `modelId()` from the coordinator and refuses on a mismatch.
 - Both deploys call `setDinToken`.
 - Fix the latent `NameError` when the `stake` entry is missing (`deploy.py:27-28`, `:61-62`).
-- `dinrep registry approve-registration-request` compares the request's contracts' `modelId()` with `totalModels()`. On a mismatch it refuses, unless `--force` is passed ([Decision 2](#decisions-requested)).
+- `dinrep registry approve-registration-request` compares the request's contracts' `modelId()` with `totalModels()`. On a mismatch it refuses, unless `--force` is passed ([Decision 2](#reviewer-decisions)).
 
 **New commands:**
 
@@ -171,7 +185,7 @@ The review may add others. TP-1 lists every step that changes no state.
 | `dincli auditor register-encryption-key` | `DinValidatorStake.registerEncryptionKey` | Generates the X25519 key **per wallet** (for example `auditor_x25519_<address>.key`, chmod 600). Today it's one shared `auditor_x25519.key`, which breaks several `--demokey` auditors on one machine. `_load_auditor_x25519_key` (`auditor.py:33-41`) is updated to match, and the owner key at `auditor_batches.py:170-177` also gets chmod 600 |
 | `dincli model-owner gi release-slots <model_id> --gi N` | `releaseGIRegistrationSlots` | BL-28 |
 | `dincli auditor dispute-test-data`, `dincli model-owner disputes resolve-test-data / reassign-test-data`, `… disputes close-expired` | test-data dispute functions (`DINTaskAuditor.sol:1480`, `:1524`, `:1557`, `:1601`) | Bond approval first |
-| `dincli aggregator dispute`, `dincli model-owner disputes resolve-aggregation / settle-recomputation`, `… expire`, `… claim-bond` | coordinator dispute functions (`:1368`, `:1535`, `:1609`, `:1671`, `:1584`) | S4 |
+| `dincli aggregator dispute`, `dincli model-owner disputes resolve-aggregation / settle-recomputation`, `… expire`, `… claim-bond` | coordinator dispute functions (`:1368`, `:1535`, `:1609`, `:1671`, `claimDisputeBond` at `:1575`) | S4 |
 
 **Fail fast instead of reverting:**
 - `gi start` checks `giRewardPool(next GI) > 0` and points to `rewards deposit`.
@@ -184,7 +198,7 @@ The review may add others. TP-1 lists every step that changes no state.
 
 **Tests:** one pytest per command group in the `tests/test_dinrep_add_slasher.py` style (`SimpleNamespace` context, `build_and_send_tx` monkeypatched). They check the call arguments, approve-before-act, and the fail-fast checks.
 
-**Estimate:** 3 days. The dispute commands can be split out ([Decision 4](#decisions-requested)).
+**Estimate:** 3 days. The dispute commands can be split out ([Decision 4](#reviewer-decisions)).
 
 ---
 
@@ -207,7 +221,7 @@ The review may add others. TP-1 lists every step that changes no state.
 7. `slash auditors` → `slash aggregators` → `gi end` (assert `GIended` by name and its new ordinal)
 8. `rewards claim` / `withdraw` for one client, one auditor and one aggregator (assert the DIN balance goes up) → `gi release-slots`
 
-**Optional second GI** ([Decision 3](#decisions-requested)): fund GI 2 → `gi start` from `GIended`. This proves the loop and the slot release.
+**Optional second GI** ([Decision 3](#reviewer-decisions)): fund GI 2 → `gi start` from `GIended`. This proves the loop and the slot release.
 
 **Docs:** `tests/dincli/NOTES.md` (the INTERIM hardhat notes and the GI map) and `Documentation/technical/testing/dincli-testing-guide.md`:
 - 7 platform contracts, not 4;
@@ -237,8 +251,10 @@ These docs walk the GI or the role commands. Each is brought to the final comman
 | `Documentation/public/workflows/din-workflow.md` | 7 contracts; `withdraw` → `sweep-fees`; the fee value conflict |
 | `Documentation/technical/contracts/DINShared.md` §2.2 | diagram with the funding gate, seed and test-data states |
 | `CLAUDE.md` | 7 platform contracts; GI summary with funding, seed locks, keys, reveals, claim and release slots |
+| `Documentation/public/setup.md` | Option B's `pip install git+…@main#subdirectory=dist` can't build: `dist/` on `main` holds only wheels and sdists, with no `pyproject.toml`. Replace it with a working install (e.g. `pip install "git+https://github.com/InfiniteZeroFoundation/DevNet.git@main"` from the repo root, or a direct wheel URL), and bring Option A's wheel name (`dincli-0.1.0`) to the current version |
+| `Developer/ROADMAP.md:19` | Rewrite the deploy-blocker sentence ("24,585 B … 9 B over EIP-170") for the PR #211 sizes and the CI size gate. The "DevNet 3.0" vs "DevNet 2.0" naming is flagged in the PR for Umer to decide |
 
-Flagged for the reviewer, not changed here: `ROADMAP.md:19` (stale size sentence, "DevNet 3.0" naming) and the node README's "local Hardhat devnet" line.
+Flagged for the reviewer, not changed here: the node README's "local Hardhat devnet" line.
 
 After merge: a wiki follow-up for the pages that say "no dincli command yet".
 
@@ -258,12 +274,14 @@ After merge: a wiki follow-up for the pages that say "no dincli command yet".
 
 ---
 
-## Decisions requested
+## Reviewer decisions
 
-1. **New GI states:** the recommended three (`AuditSeedLocked`, `AuditTestDataAssigned`, `AggSeedLocked`), any others, and whether `setTestDataAssignedFlag(false)` stays possible.
-2. **`modelId` check:** dincli-side at approval (recommended; no contract change), or contract-side in `DINModelRegistry.approveModel` (a platform upgrade).
-3. **Suite:** one GI (recommended for the first pass), or two GIs to prove the loop.
-4. **Dispute commands:** in TP-3 (recommended, so the role docs are complete) or split into a follow-up.
+Resolved 2026-10-06 on the [decisions comment](https://github.com/InfiniteZeroFoundation/DevNet/pull/229#issuecomment-6000552418). The reviewer's recommended option was accepted each time.
+
+1. **New GI states: B.** All three, with `AuditTestDataAssigned` first in priority, then `AuditSeedLocked`, then `AggSeedLocked`. `AuditTestDataAssigned` only counts if `setTestDataAssignedFlag` checks that every batch has a stored commitment (review amendment 5). The `flag=false` question is dropped, because the flag is already one-way.
+2. **`modelId` check: A.** It is done in dincli at approval: `approve-registration-request` refuses on a mismatch unless `--force` is passed. A contract-side check in `DINModelRegistry.approveModel` is a mainnet-registry follow-up, in the same area as BL-34 / issue #224.
+3. **Suite: A.** One complete GI. A second GI is added afterwards as an optional test, marked `integration` + slow and kept out of CI.
+4. **Dispute commands: A.** They stay in TP-3 and are built against the PR #215 dispute shape: owner-only resolve, an unanswered dispute upheld on expiry, no penalty after settlement, and `TA_RewardsAlreadySettled`.
 
 ---
 
