@@ -4,7 +4,7 @@
 **Author:** Umer Majeed (@umermjd11)
 **Reviewer:** @umeradl
 **Created:** 2026-10-05
-**Status:** Pending review
+**Status:** Approved in PR #219 with [review amendments 1–5](https://github.com/InfiniteZeroFoundation/DevNet/pull/219#issuecomment-6001172350) and [reviewer decisions 1–3](https://github.com/InfiniteZeroFoundation/DevNet/pull/219#issuecomment-6001173454) (recommended options accepted). Forwarded 2026-10-06 → [task_061026_20](https://github.com/InfiniteZeroFoundation/DevNet/blob/develop/Developer/tasks/task_061026_20.md) (forwarding PR, linked on this PR)
 **Proposed dates:** Oct 6 – Oct 9, 2026
 **Repo:** https://github.com/InfiniteZeroFoundation/DevNet
 **Base branch:** `develop`. The plan was written against commit `740a613` (2026-10-05, after PR #215 and its follow-up). Line numbers below are for that commit.
@@ -29,7 +29,7 @@ The dincli, integration-suite and docs items this plan first carried (BL-27/BL-2
 |---|---|---|---|
 | TP-1 | [#201](https://github.com/InfiniteZeroFoundation/DevNet/issues/201) Part A, item 4 | `DINTaskAuditor` size review | Left open in the [#201 status update](https://github.com/InfiniteZeroFoundation/DevNet/issues/201). `DINTaskAuditor` is at 22,718 B (1,858 B margin), so the gate warns on every PR, and TP-2 and later mechanism work add more bytes |
 | TP-2 | [#180](https://github.com/InfiniteZeroFoundation/DevNet/issues/180) | Dual-role registration (auditor + aggregator, same GI) | The decision is all that's missing. Prototype: guard +103 B. Also carries the amendment-4 NatSpec fix |
-| TP-3 | [#193](https://github.com/InfiniteZeroFoundation/DevNet/issues/193) | S5 recidivism per slasher contract | `DinValidatorStake` has about 14 KB headroom. Needs an option choice ([Decision 3](#decisions-requested)). The fix fits the existing storage gap |
+| TP-3 | [#193](https://github.com/InfiniteZeroFoundation/DevNet/issues/193) | S5 recidivism per slasher contract | `DinValidatorStake` has about 14 KB headroom. Needs an option choice ([Decision 3](#reviewer-decisions)). The fix fits the existing storage gap |
 
 ---
 
@@ -39,7 +39,7 @@ The dincli, integration-suite and docs items this plan first carried (BL-27/BL-2
 |---|---|
 | #201 A4 | `DINTaskAuditor` is 22,718 B runtime (1,858 B margin, gate **warns**). It has 16 public mappings, and several duplicate an existing view or have no reader outside the contract (see TP-1) |
 | #180 | `registerDINAuditor` (`DINTaskAuditor.sol:667-698`) and `registerDINaggregator` (`DINTaskCoordinator.sol:401-434`) have no cross-role check. The PR #182 review ruled dual-role **not** intended (`adversarial-threat-model.md` Judgment call 2, Row 6 = KNOWN GAP). The stale "(not yet enforced)" NatSpec is still at `DinValidatorStake.sol:451` and `:462` |
-| #193 | The S5 ring is `_partialSlashGIs[validator][msg.sender]` (`DinValidatorStake.sol:146`, used in `slashPartial` at `:294-322`), so it is counted per slasher **contract**. Even within one model, S1 (auditor contract) and S2 (coordinator) are separate rings. `MECHANISM_DESIGN.md:81` defines S5 per validator across both roles |
+| #193 | The S5 ring is `_partialSlashGIs[validator][msg.sender]` (`DinValidatorStake.sol:146`, used in `slashPartial` at `:294-322`), so it is counted per slasher **contract**. Even within one model, S1 (auditor contract) and S2 (coordinator) are separate rings. `Developer/design/MECHANISM_DESIGN.md:81` defines S5 per validator across both roles |
 
 ---
 
@@ -47,7 +47,7 @@ The dincli, integration-suite and docs items this plan first carried (BL-27/BL-2
 
 | Item | Touches | Conflicts with | Rule |
 |---|---|---|---|
-| TP-1 | `DINTaskAuditor.sol` (getter visibility), the foundry tests that read those getters, `dincli/abis/DINTaskAuditor.json`, `DINTaskAuditor.md` §3 | TP-2 (same contract, size); plan 2 TP-3 (views it reads) | **First.** Measure on the actual implementation and agree the getter set ([Decision 1](#decisions-requested)) |
+| TP-1 | `DINTaskAuditor.sol` (getter visibility), the foundry tests that read those getters, `dincli/abis/DINTaskAuditor.json`, `DINTaskAuditor.md` §3 | TP-2 (same contract, size); plan 2 TP-3 (views it reads) | **First.** Measure on the actual implementation and agree the getter set ([Decision 1](#reviewer-decisions)) |
 | TP-2 | `DINTaskAuditor.registerDINAuditor`, `IDINTaskCoordinator` (`DINShared.sol`), a new error, `DinValidatorStake.sol` NatSpec, tests, threat model Row 6 | TP-1 | After TP-1, or as commit 2 of TP-1's PR (the same pattern as task_021026_19 A+B) |
 | TP-3 | `DinValidatorStake.sol` (S5 storage + `slashPartial`), S5 tests, `DinValidatorStake.md`, threat model Row 11, deploy-script S5 keys | — | **In parallel with TP-1.** Different contract |
 
@@ -65,21 +65,36 @@ Same approach as task_021026_19 Part A. Shrink the contract in place, with no li
 
 | Getter | Readers outside the contract | Saving | Note |
 |---|---|---|---|
-| `auditBatches` (struct array) | 1 foundry test | −100 B | `getAuditorsBatch` already returns the batch |
+| `auditBatches` (struct array) | none (the only hit is a comment, `RewardEngine.t.sol:895`) | −100 B | `getAuditorsBatch` already returns the batch |
 | `dinAuditors` | none | −83 B | `getDINtaskAuditors` already returns the list |
 | `Is_testdataCIDs_Assigned` | none | −58 B | Unused |
 | `auditorGIWeight` | none | −79 B | |
 | `rewardClaimed` | none | −84 B | plan 2's claim command reads it, so **keep** |
 | `testDataDisputes` | 2 foundry tests | −117 B | plan 2's dispute commands read it, so **keep** |
 | `giRewardSnapshot` | 2 foundry tests | −145 B | plan 2's claim command reads `settled`, so **keep** |
-| **Recommended four** (the first four rows) | | **−320 B → 22,398 B** (2,178 B margin) | Clears the warn band. With TP-2: about 22,501 B |
+| **Recommended four** (the first four rows) | | **−320 B → 22,398 B** (2,178 B margin) | Clears the warn band. With TP-2: 22,500 B (measured in the review) |
 | All seven | | −666 B → 22,052 B | Only if plan 2 reads that state some other way |
 
 Scope:
-- Make the agreed getters `internal`. Switch the one foundry test from `auditBatches` to `getAuditorsBatch`.
+- Make the agreed getters `internal`. No test reads `auditBatches`, so no test changes are needed.
 - Regenerate `dincli/abis/DINTaskAuditor.json` (`dump-abi --official`) and update `DINTaskAuditor.md` §3.
 - Check the subgraph branch for reads of the dropped getters, and post an ABI note on PR #29 (as in task_021026_19 Part A).
-- Do the "same review" of per-phase duplication that #201 item 4 asks for. Measure folding the near-duplicate dispute and reassignment paths. Commit a fold only if it actually shrinks the contract: in task_021026_19, `via_ir` made the coordinator folds **grow** it.
+- Do the "same review" of per-phase duplication that #201 item 4 asks for. Measuring the folds of the near-duplicate dispute and reassignment paths is **required, not optional** (review amendment 3): TP-1 + TP-2 leave only 28 B above the 2,048 B warn line. Commit a fold only if it actually shrinks the contract: in task_021026_19, `via_ir` made the coordinator folds **grow** it.
+
+**`DINTaskAuditor` budget across both plans** (review amendment 4 / Decision 1). Scratch builds on `a1fcce2`, `via_ir`, 200 runs:
+
+| Step | Runtime | Margin | Band |
+|---|---|---|---|
+| `develop` | 22,718 B | 1,858 B | warn |
+| + TP-1 (four getters `internal`) | 22,398 B | 2,178 B | ok |
+| + TP-2 (#180 guard, +102 B) | 22,500 B | 2,076 B | ok (28 B above the warn line) |
+| + plan 2's every-batch commitment check in `setTestDataAssignedFlag` (+75 B) | 22,575 B | 2,001 B | **warn** (47 B under the line, far above the 1,024 B fail line) |
+
+To get back out of the warn band after both plans:
+- The fold review above.
+- Dropping `Is_testdataCIDs_Assigned` entirely, once task_061026_21's `AuditTestDataAssigned` coordinator state guards the double-set. It is written but never read outside its own guard.
+
+Whichever task lands second reports the combined size.
 
 **Deliverables:** a size table from one build of the implementation. `forge test` (full suite, including `UpgradeValidation.t.sol`) and `pytest -m "not integration"` are green, and the gate is green.
 
@@ -89,7 +104,7 @@ Scope:
 
 # TP-2 — #180: one address can't hold both roles in a GI
 
-**Recommendation: a per-address cross-role guard** ([Decision 2](#decisions-requested)). The guard is Sybil-bypassable (a second address with its own stake), which the threat model already notes. But it forces the attacker to put up a second stake and makes the attack visible on-chain, for +103 B. Documenting stake cost as the only defence would also need a non-zero `maxConcurrentRegistrationsPerStakeUnit` default. That is a tokenomics call belonging to #155, so I'd rather not tie this fix to it.
+**Recommendation: a per-address cross-role guard** ([Decision 2](#reviewer-decisions)). The guard is Sybil-bypassable (a second address with its own stake), which the threat model already notes. But it forces the attacker to put up a second stake and makes the attack visible on-chain, for +103 B. Documenting stake cost as the only defence would also need a non-zero `maxConcurrentRegistrationsPerStakeUnit` default. That is a tokenomics call belonging to #155, so I'd rather not tie this fix to it.
 
 - **Where the guard goes.** Aggregator registration (states 6–7) always comes **before** auditor registration (8–9) (`DINShared.sol:17-20`). So the guard belongs in `registerDINAuditor`: `if (dintaskcoordinatorContract.isDINAggregator(_GI, msg.sender)) revert TA_DualRoleNotAllowed();`. It needs `isDINAggregator(uint256,address)` added to `IDINTaskCoordinator`, and the coordinator's public mapping `isDINAggregator` (`DINTaskCoordinator.sol:34`) already provides it. A coordinator-side guard would never fire, because no auditor exists yet when aggregators register.
 - **Prototype cost:** `DINTaskAuditor` goes from 22,718 to 22,821 B (+103 B). The coordinator is unchanged.
@@ -106,7 +121,7 @@ Scope:
 
 # TP-3 — #193: S5 escalation across models
 
-**Recommendation: a two-level check where the global level is time-based** ([Decision 3](#decisions-requested), options A/B/C below).
+**Recommendation: a two-level check where the global level is time-based** ([Decision 3](#reviewer-decisions), options A/B/C below).
 
 - **The per-slasher ring stays as it is** (per-model escalation, existing tests and semantics).
 - **Add a per-validator global ring of `block.timestamp` values**, `_partialSlashTimes[validator]`, with `s5GlobalWindow` (seconds) and `s5GlobalThreshold`.
@@ -123,13 +138,13 @@ Scope (option A):
 - **Storage.** Append the new storage before `__gap` (`DinValidatorStake.sol:174`) and shrink the gap by the slots used. `DinValidatorStakeV2` inherits the change, and `UpgradeValidation.t.sol` plus the `DeployPlatform.t.sol` upgrade tests must stay green.
 - **Setter.** `setS5GlobalParams(window, threshold)` with the same validation style as `setS5RecidivismParams` (`:583-594`).
   - **Defaults:** `s5GlobalWindow = 7 days` and `s5GlobalThreshold = 2 × s5RecidivismThreshold` (6). These are placeholders until #155.
-  - Set them in `initialize`. For an upgraded proxy, use a `reinitializer` or treat 0 as off (decide in the PR). Add optional deploy-script env keys `S5_GLOBAL_*`, matching the existing `S5_*` keys.
+  - Set them in `initialize`. For an upgraded proxy, **0 means off** (Decision 3), not a `reinitializer`. Nothing on `develop` is deployed, and the DevNet 2.0 deploy is a fresh `DeployPlatform.s.sol` run, so `initialize` sets the defaults. Add optional deploy-script env keys `S5_GLOBAL_*`, matching the existing `S5_*` keys.
 - **Event.** `ValidatorEscalatedS5` gets a level flag, or a sibling event, so indexers can tell which level fired.
 - **Tests:**
   - **Two slashers below the threshold.** Two task contracts each slash one validator (threshold−1) times within the window. The global level escalates.
   - **Window expiry** resets the count.
   - **Per-model behaviour unchanged.** The existing S5 tests and `test_crossModelGICollision_slashPartialDoesNotUnderflow` stay green.
-- **Docs:** `DinValidatorStake.md`, `MECHANISM_DESIGN.md` S5 row, and threat model Row 11 (change it to DEFENDED). Also record the separate discrepancy found here: `MECHANISM_DESIGN.md:87` says S5 is "entire slashable stake + blacklist", while the code does `MIN_STAKE` + a 7-day jail. Note it; don't change it in this TP.
+- **Docs:** `DinValidatorStake.md`, `Developer/design/MECHANISM_DESIGN.md` S5 row, and threat model Row 11 (change it to DEFENDED). Also record the separate discrepancy found here: `Developer/design/MECHANISM_DESIGN.md:87` says S5 is "entire slashable stake + blacklist", while the code does `MIN_STAKE` + a 7-day jail. Note it; don't change it in this TP.
 
 **Estimate:** 1.5 days.
 
@@ -147,11 +162,13 @@ Scope (option A):
 
 ---
 
-## Decisions requested
+## Reviewer decisions
 
-1. **TP-1 getter set.** The recommended four (`auditBatches`, `dinAuditors`, `Is_testdataCIDs_Assigned`, `auditorGIWeight`) save −320 B. The alternative is all seven (−666 B), with plan 2's commands then reading dispute, snapshot and claim state through new views (which cost bytes back) or events.
-2. **#180.** The per-address guard in `registerDINAuditor` (recommended, +103 B), or document stake cost as the defence with a non-zero concurrency cap (which needs a #155 value).
-3. **#193.** Option A (two-level, time-based global ring; recommended), B (global ring only) or C (accept and document). For A, confirm the placeholder defaults: `7 days` / threshold `6`.
+Resolved 2026-10-06 on the [decisions comment](https://github.com/InfiniteZeroFoundation/DevNet/pull/219#issuecomment-6001173454). The reviewer's recommended option was accepted each time.
+
+1. **TP-1 getter set: A, with C's accounting.** The four getters (`auditBatches`, `dinAuditors`, `Is_testdataCIDs_Assigned`, `auditorGIWeight`) become `internal`. The PR reports one size table covering TP-1, TP-1 + TP-2, and task_061026_21's commitment check (budget table above). If `Is_testdataCIDs_Assigned` is still needed after task_061026_21, it stays `internal`.
+2. **#180: A, a per-address guard in `registerDINAuditor`,** with the three tests. PR #218's `test_knownGap_dualRoleRegistration` flips to `test_defended_…` in whichever PR lands second.
+3. **#193: A, two-level S5.** Placeholder defaults are `7 days` / threshold `6` until #155. For upgraded proxies, 0 means off (no `reinitializer`). `UpgradeValidation.t.sol` stays green. The `Developer/design/MECHANISM_DESIGN.md:87` discrepancy is recorded as a note, not changed.
 
 ---
 
