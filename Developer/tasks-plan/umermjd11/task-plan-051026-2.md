@@ -172,7 +172,7 @@ The review may add others. TP-1 lists every step that changes no state.
 - `model-owner deploy task-coordinator` / `task-auditor` get `--model-id`. The default is `DINModelRegistry.totalModels()`, the ID the next approval assigns (`DINModelRegistry.sol:237`), with a warning that the guess only holds if no other request is approved first.
 - The auditor deploy reads `modelId()` from the coordinator and refuses on a mismatch.
 - Both deploys call `setDinToken`.
-- Fix the latent `NameError` when the `stake` entry is missing (`deploy.py:27-28`, `:61-62`).
+- Fix the latent `NameError` when the `stake` entry is missing (`deploy.py:27-28`, `:63-64`).
 - `dinrep registry approve-registration-request` compares the request's contracts' `modelId()` with `totalModels()`. On a mismatch it refuses, unless `--force` is passed ([Decision 2](#reviewer-decisions)).
 
 **New commands:**
@@ -185,7 +185,7 @@ The review may add others. TP-1 lists every step that changes no state.
 | `dincli auditor register-encryption-key` | `DinValidatorStake.registerEncryptionKey` | Generates the X25519 key **per wallet** (for example `auditor_x25519_<address>.key`, chmod 600). Today it's one shared `auditor_x25519.key`, which breaks several `--demokey` auditors on one machine. `_load_auditor_x25519_key` (`auditor.py:33-41`) is updated to match, and the owner key at `auditor_batches.py:170-177` also gets chmod 600 |
 | `dincli model-owner gi release-slots <model_id> --gi N` | `releaseGIRegistrationSlots` | BL-28 |
 | `dincli auditor dispute-test-data`, `dincli model-owner disputes resolve-test-data / reassign-test-data`, `… disputes close-expired` | test-data dispute functions (`DINTaskAuditor.sol:1480`, `:1524`, `:1557`, `:1601`) | Bond approval first |
-| `dincli aggregator dispute`, `dincli model-owner disputes resolve-aggregation / settle-recomputation`, `… expire`, `… claim-bond` | coordinator dispute functions (`:1368`, `:1535`, `:1609`, `:1671`, `claimDisputeBond` at `:1575`) | S4 |
+| `dincli aggregator dispute`, `dincli model-owner disputes resolve-aggregation / settle-recomputation`, `… expire`, `… claim-bond` | coordinator dispute functions (`:1368`, `:1535`, `:1609`, `:1671`, `claimDisputeBond` at `:1583`) | S4 |
 
 **Fail fast instead of reverting:**
 - `gi start` checks `giRewardPool(next GI) > 0` and points to `rewards deposit`.
