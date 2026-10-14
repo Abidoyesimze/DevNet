@@ -115,8 +115,9 @@ that runs `pytest tests/dincli/ -v -x -m integration --tb=short` with
 `DIN_TEST_ISOLATED=1` on a GitHub-hosted runner.
 
 - **When it runs:** on PRs and pushes to `develop` that change
-  `foundry/src/`, `foundry/script/`, `foundry/anvil.sh`, `dincli/`,
-  `tests/dincli/` or `ci.yml`. The workflow itself has no path filters
+  `foundry/src/`, `foundry/script/`, `foundry/anvil.sh`, `hardhat/`,
+  `dincli/`, `tests/dincli/` or `ci.yml`. (`hardhat/` is included while the
+  suite still deploys the task contracts from Hardhat artifacts.) The workflow itself has no path filters
   because `CI OK` is the single required check, so the small
   **Integration paths** job decides by diffing against the base. When it
   cannot diff (a force push, for example), the suite runs.

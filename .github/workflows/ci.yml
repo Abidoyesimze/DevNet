@@ -182,7 +182,7 @@ jobs:
             exit 0
           fi
           git diff --name-only "$base" HEAD > "$RUNNER_TEMP/changed.txt"
-          if grep -qE '^(foundry/(src|script)/|foundry/anvil\.sh$|dincli/|tests/dincli/|\.github/workflows/ci\.yml$)' "$RUNNER_TEMP/changed.txt"; then
+          if grep -qE '^(foundry/(src|script)/|foundry/anvil\.sh$|hardhat/|dincli/|tests/dincli/|\.github/workflows/ci\.yml$)' "$RUNNER_TEMP/changed.txt"; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -227,19 +227,16 @@ jobs:
           python-version: '3.12'
           cache: pip
 
-      # forge installs solc into ~/.svm when that directory exists, otherwise
-      # into $XDG_DATA_HOME/svm (~/.local/share/svm on a fresh runner).
-      - name: Locate the solc install directory
-        id: svm
-        run: |
-          if [ -d "$HOME/.svm" ]; then dir="$HOME/.svm"; else dir="${XDG_DATA_HOME:-$HOME/.local/share}/svm"; fi
-          echo "dir=$dir" >> "$GITHUB_OUTPUT"
-
+      # forge (svm-rs) installs solc into ~/.local/share/svm only when ~/.svm is
+      # missing and ~/.local/share already exists, otherwise into ~/.svm (the
+      # fresh-runner case). Which one is only known after forge build, so cache
+      # both; the step after forge build picks the one in use.
       - name: Cache Solidity compilers
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            ${{ steps.svm.outputs.dir }}
+            ~/.svm
+            ~/.local/share/svm
             ~/.cache/hardhat-nodejs
           key: solc-${{ runner.os }}-${{ hashFiles('foundry/foundry.toml', 'hardhat/hardhat.config.ts') }}
 
@@ -270,6 +267,13 @@ jobs:
       - name: forge build
         working-directory: foundry
         run: forge build
+      # Same rule as svm-rs, now that forge has created the directory it uses.
+      - name: Locate the solc install directory
+        id: svm
+        run: |
+          if [ -d "$HOME/.svm" ]; then dir="$HOME/.svm"; else dir="${XDG_DATA_HOME:-$HOME/.local/share}/svm"; fi
+          ls -d "$dir"/*/ > /dev/null 2>&1 || { echo "::error::no solc versions in $dir after forge build"; exit 1; }
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
       - name: Install hardhat deps
         working-directory: hardhat
         run: npm ci
@@ -294,7 +298,10 @@ jobs:
 
       # Scratch must not exist yet (the harness creates and deletes it); the
       # results dir outlives it and holds the compile, chain and IPFS logs.
+      # A step timeout below the job's, so a hung suite fails this step (and
+      # the upload below still runs) instead of the whole job being cancelled.
       - name: Full-GI integration suite
+        timeout-minutes: 85
         env:
           DIN_TEST_ISOLATED: '1'
           DIN_TEST_TMPDIR: ${{ runner.temp }}/din-scratch

@@ -268,7 +268,8 @@ def test_anvil_sh_carries_the_chain_flags_and_forwards_arguments(tmp_path):
     ).stdout.splitlines()
 
     for flag, value in {"--chain-id": "1337", "--accounts": "70", "--block-time": "2",
-                        "--code-size-limit": "4294967295"}.items():
+                        "--code-size-limit": "4294967295", "--balance": "10000",
+                        "--mnemonic": "test test test test test test test test test test test junk"}.items():
         assert args[args.index(flag) + 1] == value
     assert args[-2:] == ["--host", "127.0.0.1"]
 
