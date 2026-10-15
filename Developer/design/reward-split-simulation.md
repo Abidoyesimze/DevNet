@@ -53,9 +53,14 @@ Per-GI pool breakdown at 50 DIN:
 | Treasury     |  500 |  2.50  |
 | **Total**    | 10000| 50.00  |
 
-Rounding dust: `treasuryShare = pool − clientPool − auditorPool − aggregatorPool` absorbs
-all integer-division remainders (implemented in `DINTaskAuditor.settleRewards`, confirmed
-correct since PR #134 — see BL-14 note at the end of this document).
+Rounding dust — two layers: `treasuryShare = pool − clientPool − auditorPool − aggregatorPool`
+absorbs the *top-level* 4-way bps split's integer-division remainder (implemented in
+`DINTaskAuditor.settleRewards`, confirmed correct since PR #134 — see BL-14 note at the end
+of this document). A second, separate layer inside `claimReward` floor-divides each role's
+pool again per participant; that remainder stays in the contract, untracked and
+unrecoverable — accepted by design, see
+[DINTaskAuditor.md §13 No. 4](../../Documentation/technical/contracts/DINTaskAuditor.md#13-review-notes--open-caveats)
+/ [issue #250](https://github.com/InfiniteZeroFoundation/DevNet/issues/250).
 
 ---
 
@@ -113,11 +118,11 @@ All invariants checked after each case.
 
 Pool: 50 DIN. MID tier (10 T1 agg, 2 T2 agg, 15 auditors, 250 clients).
 
-| Role         | Pool (DIN) | Participants | Per-participant (DIN) | Unspent |
+| Role         | Pool (DIN) | Participants | Per-participant (DIN) | Per-participant dust (stranded in `DINTaskAuditor`) |
 |--------------|------------|-------------|-----------------------|---------|
-| Clients      | 30.000     | 250         | 0.12000               | 0 (dust → treasury) |
-| Auditors     | 10.000     | 15          | 0.66667               | 0 (dust → treasury) |
-| Aggregators  | 7.500      | 12 (weight) | 0.62500               | 0 |
+| Clients      | 30.000     | 250         | 0.12000               | 0 (exact division) |
+| Auditors     | 10.000     | 15          | 0.66667               | 10 wei — not swept to treasury; see BL-14 note |
+| Aggregators  | 7.500      | 12 (weight) | 0.62500               | 0 (exact division) |
 | Treasury     | 2.500      | —           | —                     | — |
 
 Invariants: ✅ pool_bound ✅ role_bounds ✅ invalid_zero ✅ fee_conservation ✅ deterministic_rounding
@@ -134,7 +139,10 @@ Aggregator pool redistributed among remaining 9 T1 agg + 2 T2 agg (total weight 
 | Per-remaining (T1, wt 1) | 0.682 DIN |
 | Auditor / client pools   | unchanged |
 
-Rollover: none — pool is fixed at settleRewards time; unspent agg share stays in treasury.
+Rollover: none — pool is fixed at settleRewards time; the full 7.500 DIN aggregator pool
+remains nominally allocated across the 11 remaining weight units, with ~2 wei of
+per-participant floor-division dust stranded in `DINTaskAuditor` (not swept to treasury —
+see BL-14 note).
 Invariants: ✅ all pass. `invalid_work_reward == 0` confirmed.
 
 ### Case 3 — Auditor failure (3 of 15 auditors miss submission)
@@ -153,20 +161,25 @@ Invariants: ✅ all pass.
 
 All aggregator submissions fail or no aggregators registered. Aggregator pool unspent.
 
-Policy decision (recorded here): when `aggTotalWeight == 0` at claim time,
-`claimReward` returns 0 for aggregators; the 7.5 DIN remains in `treasuryAccrued`
-(not rolled forward to the next GI). This matches the "unspent → treasury" pattern used
-throughout the reward engine.
+Policy (corrected — the "unspent → treasury" pattern previously recorded here was never
+actually implemented): when `totalAggregatorWeight[gi] == 0` at claim time, `claimReward`
+returns 0 for every aggregator claim, so the 7.5 DIN aggregator share is never claimed by
+anyone and stays stuck in `DINTaskAuditor`'s token balance with no reclaim path — the same
+zero-participant case documented in
+[DINTaskAuditor.md §13 No. 4](../../Documentation/technical/contracts/DINTaskAuditor.md#13-review-notes--open-caveats).
+It is not swept to `treasuryAccrued`.
 
 Auditor rewards unaffected if evaluation completed before aggregation started.
-Invariants: ✅ all pass. `aggregator_paid == 0`, `treasury += 7.5`.
+Invariants: ✅ all pass. `aggregator_paid == 0`; 7.5 DIN worth of tokens stranded in
+`DINTaskAuditor`, unreachable.
 
 ### Case 5 — No accepted auditors
 
 All auditors fail or scored below pass threshold. Auditor pool unspent.
 
-Policy: same as Case 4 — `auditorTotalWeight == 0` means auditor pool goes to
-`treasuryAccrued`. Aggregation rewards unaffected.
+Policy: same as Case 4 — `giTotalAuditWeight[gi] == 0` means the 10 DIN auditor pool is
+never claimed by anyone and stays stuck in `DINTaskAuditor`, not swept to `treasuryAccrued`.
+Aggregation rewards unaffected.
 Invariants: ✅ all pass.
 
 ### Case 6 — Jailed / slashed validator
@@ -240,14 +253,18 @@ Pool: 1 DIN/GI. Split at 60/20/15/5 → client=0.6, auditor=0.2, agg=0.15, treas
 
 At HIGH tier (30 auditors, 500 clients):
 
-| Role       | Pool (wei)     | Participants | Per-participant (wei) | Remainder (→ treasury) |
+| Role       | Pool (wei)     | Participants | Per-participant (wei) | Per-participant dust (stranded in `DINTaskAuditor`) |
 |------------|----------------|-------------|----------------------|------------------------|
 | Clients    | 600000000000000000 | 500   | 1200000000000000     | 0 |
 | Auditors   | 200000000000000000 | 30    | 6666666666666666     | 20 wei |
 | Aggregators| 150000000000000000 | 22 wt | 6818181818181818    | 4 wei  |
-| Treasury   | 50000000000000000  | —     | +24 wei dust         | — |
+| Treasury   | 50000000000000000  | —     | —                     | top-level remainder: 0 wei (see below) |
 
-Total dust = 24 wei. `treasuryShare` absorbs it via subtraction pattern.
+Total per-participant dust = 24 wei (20 auditor + 4 aggregator), stranded in
+`DINTaskAuditor` — not absorbed by `treasuryShare`, which only covers the top-level bps
+split's remainder. That top-level remainder is 0 wei here: `0.6 + 0.2 + 0.15 + 0.05` DIN
+sums exactly to 1 DIN, so there's nothing left for the subtraction pattern to sweep in this
+case. See the BL-14 note below for the distinction between the two layers.
 No overpayment. Output is deterministic from identical inputs (no random elements in
 `settleRewards` / `claimReward`).
 Invariants: ✅ all pass including `deterministic_rounding`.
@@ -306,7 +323,8 @@ The current defaults are already enforced by `setRewardSplit`'s `sum == 10000` g
 
 ## BL-14 — Rounding dust resolution
 
-**BL-14 is resolved** (closed via PR #134 + PR #131, merged 2026-09-10).
+**BL-14 is resolved, for the top-level split only** (closed via PR #134 + PR #131, merged
+2026-09-10).
 
 `DINTaskAuditor.settleRewards` computes:
 
@@ -317,7 +335,23 @@ uint256 aggregatorPool = (pool * split.aggregatorBps)  / BPS_DENOMINATOR;
 uint256 treasuryShare  = pool - clientPool - auditorPool - aggregatorPool;
 ```
 
-The subtraction pattern on the last term guarantees all integer-division remainders
-accumulate to `treasuryAccrued`. There is no stranded dust — every wei of the pool
-is either credited to a claimable role snapshot or credited to `treasuryAccrued`.
-Case 10 above confirms this numerically. No further action required.
+The subtraction pattern on the last term guarantees all integer-division remainders from
+this *top-level* 4-way split accumulate to `treasuryAccrued` (forwarded to the slash-treasury
+via `_forwardToTreasury`, burned if unset). Case 10 above confirms this numerically for the
+top-level split (0 wei remainder in that case).
+
+### Per-participant dust (accepted)
+
+This does **not** cover a second, separate rounding layer: `claimReward` divides each role's
+settled pool again, per participant, by floor division (`pool * weight / total`). Each
+participant's share rounds down independently, so up to `participants − 1` wei per role pool
+per GI is left behind — untracked (no "distributed so far" counter exists, and `claimReward`
+emits no per-GI event) and unrecoverable. Case 1 (10 wei, auditors), Case 2 (~2 wei), and
+Case 10 (24 wei total) above are all instances of this layer, not of the top-level split.
+
+This is accepted as permanent, economically negligible dust rather than fixed: a sweep would
+need a per-bucket participant-count tracked incrementally, which the BL-10 refactor
+deliberately removed (and `MECHANISM_DESIGN.md`'s "claimable indefinitely; no expiry for
+2.0" rules out a deadline-based sweep anyway). See
+[DINTaskAuditor.md §13 No. 4](../../Documentation/technical/contracts/DINTaskAuditor.md#13-review-notes--open-caveats)
+/ [issue #250](https://github.com/InfiniteZeroFoundation/DevNet/issues/250).
