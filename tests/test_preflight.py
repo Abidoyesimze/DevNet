@@ -4,9 +4,12 @@ Runs the script as a subprocess so we test the real exit-code behaviour,
 including the case where a required binary is absent from PATH.
 """
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PREFLIGHT = REPO_ROOT / "scripts" / "preflight.py"
@@ -33,19 +36,21 @@ class TestMissingBinaries:
         assert "foundryup" in result.stdout.lower() or "foundry" in result.stdout.lower()
 
 
+_FORGE_PRESENT = shutil.which("forge") is not None
+_needs_forge = pytest.mark.skipif(not _FORGE_PRESENT, reason="forge not on PATH — Foundry not installed in this environment")
+
+
 class TestHappyPath:
+    @_needs_forge
     def test_exits_zero_when_forge_present(self):
-        """Smoke test: exits 0 in a working dev environment."""
+        """Smoke test: exits 0 in a working dev environment with Foundry installed."""
         result = _run()
-        # If forge/anvil are present and Python >= 3.12 (which it must be to run
-        # the test suite), this should exit 0.  A missing optional package is only
-        # a WARN and must not cause a non-zero exit.
         assert result.returncode == 0, (
             f"preflight.py exited {result.returncode}.\nstdout:\n{result.stdout}\n"
             f"stderr:\n{result.stderr}"
         )
 
+    @_needs_forge
     def test_all_required_checks_passed_message(self):
         result = _run()
-        if result.returncode == 0:
-            assert "All required checks passed" in result.stdout
+        assert "All required checks passed" in result.stdout
