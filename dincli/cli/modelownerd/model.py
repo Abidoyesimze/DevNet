@@ -289,6 +289,9 @@ def submit_genesis_model(
 
     
     if score_only_rerun:
+        if accuracy is None:
+            console.print("[yellow]Genesis model hash is already on-chain and there is no tier 2 score to submit (manifest doesn't require test-dataset scoring). Pass --score to set one.[/yellow]")
+            raise typer.Exit(0)
         _confirm_or_exit("\n Do you want to submit this tier 2 score to the blockchain? \n ", "You chose not to submit the tier 2 score to the blockchain.", console)
     else:
         _confirm_or_exit("\n Do you want to submit this genesis model to the blockchain? \n ", "You chose not to submit the genesis model to the blockchain.", console)

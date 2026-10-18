@@ -1,4 +1,5 @@
 import hashlib
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -88,6 +89,9 @@ class DummyContextObj:
 
     def get_current_gi_and_state(self, contract, verbose_gi=True, verbose_state=False, verbose_state_name=False):
         return contract.gi, contract.gi_state
+
+    def get_task_dir(self, taskCoordinator_address):
+        return Path("/nonexistent-task-dir")
 
 
 def make_ctx(contract):
@@ -196,5 +200,29 @@ def test_unrelated_gi_zero_state_exits_without_sending_any_tx():
             help=False,
         )
 
+    assert contract.set_genesis_calls == []
+    assert contract.set_score_calls == []
+
+
+def test_rerun_without_score_exits_cleanly_without_sending_any_tx(monkeypatch):
+    """Score-only re-run where the manifest doesn't require test-dataset scoring and no --score is given: nothing to submit."""
+    monkeypatch.setattr(model, "get_manifest", lambda *args, **kwargs: {})
+    contract = DummyTaskCoordinatorContract(
+        gi=0,
+        gi_state=GIstatestrToIndex("GenesisModelCreated"),
+        onchain_hash=hash_bytes32(CID_A),
+    )
+    ctx = make_ctx(contract)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        model.submit_genesis_model(
+            ctx,
+            ipfs_hash=CID_A,
+            task_coordinator_address="0xTaskCoordinator",
+            score=None,
+            help=False,
+        )
+
+    assert exc_info.value.exit_code == 0
     assert contract.set_genesis_calls == []
     assert contract.set_score_calls == []
