@@ -8,7 +8,7 @@ This checklist helps us start useful conversations with potential DIN partners a
 - Check with the technical onboarding lead what the partner can try today, which network and version to use, and which guide to share.
 - Start with a trial small enough for the team to support.
 
-Be clear about what is still being decided. Participation does not guarantee income or a future token allocation. Validators can lose staked test tokens for certain missed duties; confirm the rules for their trial before they stake. Testnet balances, stakes, models, and participation records should be treated as temporary.
+Be clear about what is still being decided. Participation does not guarantee income or a future token allocation. Validators can lose staked test tokens for certain missed duties or for results that differ from the agreed outcome; confirm the rules for their trial before they stake. Testnet balances, stakes, models, and participation records should be treated as temporary.
 
 If a question needs an answer we do not have yet, note it and arrange a follow-up.
 
