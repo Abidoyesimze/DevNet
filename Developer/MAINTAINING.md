@@ -2,7 +2,7 @@
 
 How maintainers review, merge, approve and close work on this repo. This file is the agreed outcome of [Discussion 208](https://github.com/InfiniteZeroFoundation/DevNet/discussions/208). If you want to change the process, propose it there (or in a new Discussion) and update this file through a PR.
 
-**Maintainers:** [@umeradl](https://github.com/umeradl) (admin), [@Santiagocetran](https://github.com/Santiagocetran), [@robertocarlous](https://github.com/robertocarlous) and [@Abidoyesimze](https://github.com/Abidoyesimze) (Similoluwa), all with Write access. [@abrahamnash](https://github.com/abrahamnash) signs off on mechanism and product decisions.
+**Maintainers:** [@umeradl](https://github.com/umeradl) (admin), [@Santiagocetran](https://github.com/Santiagocetran), [@robertocarlous](https://github.com/robertocarlous) and [@Abidoyesimze](https://github.com/Abidoyesimze) (Similoluwa), all with Write access. [@abrahamnash](https://github.com/abrahamnash) decides mechanism and product questions with Umer, often off GitHub ([mechanism sign-off](#mechanism-sign-off)).
 
 ## 1. The rule
 
@@ -61,8 +61,12 @@ CODEOWNERS requests reviewers when you open the PR. Check that at least one requ
 
 ### 4.2 Review depth
 
-- **Any PR touching `foundry/src/**`** (contract logic, storage layout, upgrade paths) needs the peer's review **plus a second sign-off** from @umeradl or @abrahamnash, or from a security reviewer they route it to. Mechanism changes (slashing, tokenomics, fees, scoring) also need @abrahamnash's sign-off.
+- **Any PR touching `foundry/src/**`** (contract logic, storage layout, upgrade paths) needs the peer's review **plus a second sign-off** from @umeradl or @abrahamnash, or from a security reviewer they route it to. Mechanism changes also need the [mechanism sign-off](#mechanism-sign-off) below.
 - Docs-only, test-only, Python and tooling PRs need one peer.
+
+#### Mechanism sign-off
+
+Mechanism-design work (slashing, tokenomics, fees, scoring) needs **@umeradl's approval on GitHub**. That applies to the issue's plan ([No. 5.1](#51-issues-approval-before-implementation)) and to every PR that changes a mechanism. @abrahamnash may not reply on GitHub directly, so his sign-off isn't something a PR waits for there. Mechanisms are often discussed with Abraham off GitHub. If you (author or contributor) had such a conversation, summarise its outcome in a comment on the issue or PR and cc @abrahamnash and @umeradl.
 
 **What counts as evidence.** Required checks that are green against an up-to-date `develop` count as evidence for anything CI covers. The reviewer cites the CI run and doesn't re-run it. **Local reproduction is required only for what CI doesn't cover:**
 
@@ -116,7 +120,7 @@ The aim is for CI to carry repeatable verification so reviewers can focus on jud
 
 ### 5.1 Issues: approval before implementation
 
-A new non-trivial issue gets a verdict comment (*Approved / Approved with amendments / Changes requested / Not approved*) before anyone writes code. The verdict checks every factual claim (`file:line` references, "function X doesn't exist", "the ABI already has Y") against `origin/develop`. On approval, add the `Approved` label. **The approver can't be the issue's author or its intended implementer.** Mechanism-design issues (slashing, tokenomics, fees, scoring) also need @umeradl's or @abrahamnash's sign-off, because they're product decisions.
+A new non-trivial issue gets a verdict comment (*Approved / Approved with amendments / Changes requested / Not approved*) before anyone writes code. The verdict checks every factual claim (`file:line` references, "function X doesn't exist", "the ABI already has Y") against `origin/develop`. On approval, add the `Approved` label. **The approver can't be the issue's author or its intended implementer.** Mechanism-design issues (slashing, tokenomics, fees, scoring) also need @umeradl's approval, because they're product decisions ([mechanism sign-off](#mechanism-sign-off)).
 
 ### 5.2 Issues: status updates and closing
 
@@ -163,7 +167,7 @@ Anyone may answer, label, or lock stale threads. Closing a design or Ideas Discu
 ## 7. Edge cases
 
 - **Co-authored PRs** (two maintainers both committed to it): neither of them may approve it. It goes to a third maintainer or Umer.
-- **The reviewer pushes substantial fixes onto a PR:** they've become a co-author. The original author, another maintainer or Umer gives the final approval, and the reviewer doesn't merge their own fixes unreviewed.
+- **The reviewer pushes substantial fixes onto a PR:** they've become a co-author. The final approval comes from an eligible reviewer who is neither the PR author nor anyone who contributed to those fixes: another maintainer, or Umer. The reviewer doesn't merge their own fixes unreviewed.
 - **Disagreement between reviewer and author:** discuss it on the PR. If you're not converging after a round or two, tag Umer, who decides. Nobody merges over an unresolved "Changes requested".
 - **Urgent fix while the peer is offline** (for example a red `develop` blocking everyone): open the PR and tag both the peer and Umer. Whoever answers first approves it. Never merge unreviewed.
 - **PRs from other contributors** (external forks, new contributors): any maintainer who didn't co-author them may review and merge them. The `foundry/src/**` second sign-off still applies.
