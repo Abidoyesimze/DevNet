@@ -64,10 +64,6 @@ CODEOWNERS requests reviewers when you open the PR. Check that at least one requ
 - **Any PR touching `foundry/src/**`** (contract logic, storage layout, upgrade paths) needs the peer's review **plus a second sign-off** from @umeradl or @abrahamnash, or from a security reviewer they route it to. Mechanism changes also need the [mechanism sign-off](#mechanism-sign-off) below.
 - Docs-only, test-only, Python and tooling PRs need one peer.
 
-#### Mechanism sign-off
-
-Mechanism-design work (slashing, tokenomics, fees, scoring) needs **@umeradl's approval on GitHub**. That applies to the issue's plan ([No. 5.1](#51-issues-approval-before-implementation)) and to every PR that changes a mechanism. @abrahamnash may not reply on GitHub directly, so his sign-off isn't something a PR waits for there. Mechanisms are often discussed with Abraham off GitHub. If you (author or contributor) had such a conversation, summarise its outcome in a comment on the issue or PR and cc @abrahamnash and @umeradl.
-
 **What counts as evidence.** Required checks that are green against an up-to-date `develop` count as evidence for anything CI covers. The reviewer cites the CI run and doesn't re-run it. **Local reproduction is required only for what CI doesn't cover:**
 
 - storage layout and upgrade safety in `foundry/src/**`
@@ -76,6 +72,12 @@ Mechanism-design work (slashing, tokenomics, fees, scoring) needs **@umeradl's a
 - any claimed behaviour that no test exercises
 
 The author's part: a clear description of what changed and why, and tests for the change. The reviewer's part: implementation, design, edge cases and coverage, with a concise write-up of findings and any requested fixes.
+
+#### Mechanism sign-off
+
+Mechanism-design work (slashing, tokenomics, fees, scoring) needs **@umeradl's approval on GitHub**. That applies to the issue's plan ([No. 5.1](#51-issues-approval-before-implementation)) and to every PR that changes a mechanism. @abrahamnash may not reply on GitHub directly, so his sign-off isn't something a PR waits for there. Mechanisms are often discussed with Abraham off GitHub. If you (author or contributor) had such a conversation, summarise its outcome in a comment on the issue or PR and cc @abrahamnash and @umeradl.
+
+**Umer's own mechanism PRs** (from `umermjd11`): `umeradl` can't approve them, because that would be approving his own work ([No. 1](#1-the-rule)). For these PRs, the mechanism sign-off comes from @abrahamnash instead, whether he gives it on GitHub or off it. If he gives it off GitHub, it's recorded in a comment on the PR that cc's @abrahamnash. The PR still needs a peer's approval as usual.
 
 ### 4.3 The review record
 
