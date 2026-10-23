@@ -200,8 +200,7 @@ contract DinValidatorStake is
     );
 
     // Reserved for future state variables at this inheritance level.
-    // 50 - 3 slots used by the S5 global level above.
-    uint256[47] private __gap;
+    uint256[50] private __gap;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {

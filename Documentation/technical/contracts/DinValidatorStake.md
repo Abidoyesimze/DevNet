@@ -305,7 +305,7 @@ Until step 8, slasher management through the coordinator reverts `ValidatorStake
 | ProxyAdmin | One per proxy, owned by the deployer | Implementation upgrades |
 
 - **Upgrade path:** `cd foundry && CONTRACT=DinValidatorStake forge script script/UpgradePlatform.s.sol ...` (see [UpgradePlatform](foundry/script/UpgradePlatform.md)); `foundry/test/UpgradeValidation.t.sol` runs `Upgrades.validateImplementation` on the implementation, and `DinValidatorStakeUpgradeTest` in `foundry/test/DeployPlatform.t.sol` upgrades to `foundry/src/upgrade/DinValidatorStakeV2.sol` and checks stakes and access control survive.
-- **Storage:** the S5 global level appends three slots (`s5GlobalWindow`, `s5GlobalThreshold`, `_partialSlashTimes`) after the S6 block and shrinks `__gap` from 50 to 47, so the layout stays upgrade-compatible.
+- **Storage:** the S5 global level appends three slots (`s5GlobalWindow`, `s5GlobalThreshold`, `_partialSlashTimes`) after the S6 block, above `__gap`. `__gap` stays at `[50]`: nothing on `develop` is deployed yet, so per the "Core rules" in [storage_layout.md](../storage_layout.md) new variables go above it without shrinking it.
 - **Trust implication:** this contract custodies all staked DIN; the ProxyAdmin owner can replace every rule here without moving the balance.
 
 ---
@@ -328,7 +328,7 @@ Until step 8, slasher management through the coordinator reverts `ValidatorStake
 
 - `slashPartial` keeps the per-slasher GI ring and adds a per-validator timestamp ring shared by every slasher contract (`_partialSlashTimes`). Either level reaching its threshold escalates (full `MIN_STAKE` + jail) and clears both rings.
 - New owner-settable `s5GlobalWindow` (7 days) / `s5GlobalThreshold` (6), set in `initialize`; `setS5GlobalParams(window, threshold)` with (0, 0) as the off switch. On an upgraded proxy both read 0 (off); no reinitializer.
-- New events `ValidatorEscalatedS5Global` (emitted when only the global level fired; `ValidatorEscalatedS5` keeps its signature) and `S5GlobalParamsUpdated`; new view `getPartialSlashTimes`. `__gap` 50 → 47.
+- New events `ValidatorEscalatedS5Global` (emitted when only the global level fired; `ValidatorEscalatedS5` keeps its signature) and `S5GlobalParamsUpdated`; new view `getPartialSlashTimes`. Three storage slots appended above `__gap` (kept at 50).
 
 ### P3 — slashing, jailing, parameters (foundry)
 
