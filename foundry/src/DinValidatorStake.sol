@@ -199,6 +199,18 @@ contract DinValidatorStake is
         address indexed slasher
     );
 
+    /// @notice Number of S5 escalations (either level) applied to each
+    ///         validator. An escalation settles every partial slash recorded
+    ///         before it, in every slasher's ring, not only the caller's.
+    mapping(address => uint256) public s5EscalationEpoch;
+    /// @dev The s5EscalationEpoch at which each [validator][slasher] ring in
+    ///      _partialSlashGIs was last written. A ring from an earlier epoch is
+    ///      stale: it is dropped on that slasher's next partial slash and
+    ///      reads as empty through getPartialSlashGIs. Without this, misses
+    ///      that fed a global escalation would stay in the other slashers'
+    ///      rings and count a second time toward per-slasher escalation.
+    mapping(address => mapping(address => uint256)) private _partialSlashEpoch;
+
     // Reserved for future state variables at this inheritance level.
     uint256[50] private __gap;
 
@@ -361,8 +373,10 @@ contract DinValidatorStake is
             } else {
                 emit ValidatorEscalatedS5Global(validator, escalatedAmount, globalCount, msg.sender);
             }
-            // Clear this caller's ring and the global ring so the next GI
-            // starts a fresh window after jail exit.
+            // Start a new epoch so every slasher's ring counts from zero after
+            // jail exit (others are dropped lazily, see _partialSlashEpoch),
+            // and clear this caller's ring and the global ring now.
+            s5EscalationEpoch[validator]++;
             delete _partialSlashGIs[validator][msg.sender];
             delete _partialSlashTimes[validator];
             return escalatedAmount;
@@ -679,6 +693,9 @@ contract DinValidatorStake is
         address validator,
         address slasherContract
     ) external view returns (uint256[] memory) {
+        if (_partialSlashEpoch[validator][slasherContract] != s5EscalationEpoch[validator]) {
+            return new uint256[](0);
+        }
         return _partialSlashGIs[validator][slasherContract];
     }
 
@@ -755,6 +772,12 @@ contract DinValidatorStake is
     ///      arbitrarily relative to each other.
     function _trimAndRecordPartialSlash(address validator, uint256 giIndex) internal {
         uint256[] storage ring = _partialSlashGIs[validator][msg.sender];
+        // Drop a ring left over from before the validator's last S5 escalation.
+        uint256 epoch = s5EscalationEpoch[validator];
+        if (_partialSlashEpoch[validator][msg.sender] != epoch) {
+            delete _partialSlashGIs[validator][msg.sender];
+            _partialSlashEpoch[validator][msg.sender] = epoch;
+        }
         ring.push(giIndex);
 
         uint256 window = s5RecidivismWindow;

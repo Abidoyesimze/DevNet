@@ -107,7 +107,9 @@ above for why that's fine pre-deployment.
   s5GlobalWindow                         : uint256                                  (slot 17, issue #193)
   s5GlobalThreshold                      : uint256                                  (slot 18, issue #193)
   _partialSlashTimes                     : mapping(address => uint256[])            (slot 19, issue #193)
-  __gap                                  : uint256[50]                              (slot 20)
+  s5EscalationEpoch                      : mapping(address => uint256)              (slot 20, issue #193)
+  _partialSlashEpoch                     : mapping(address => mapping(address => uint256))  (slot 21, issue #193)
+  __gap                                  : uint256[50]                              (slot 22)
 ```
 
 `DIN_TOKEN` / `DIN_COORDINATOR` are set once in `initialize` (upper-case names, but

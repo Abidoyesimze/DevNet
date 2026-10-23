@@ -611,6 +611,62 @@ contract SlashingInvariantsTest is StdInvariant, Test {
         assertEq(stake.getPartialSlashGIs(validator1, slasher3).length, 0, "caller ring cleared");
     }
 
+    /// @dev The misses that fed a global escalation must not count again in
+    ///      the other slashers' per-slasher rings: one new miss after the jail
+    ///      is a partial slash, not a second MIN_STAKE escalation.
+    function test_s5Global_escalationSettlesOtherSlashersRings() public {
+        _setUpSingleValidator(stake.MIN_STAKE() * 20);
+        address slasher2 = _addSecondSlasher();
+        address slasher3 = makeAddr("slasher3");
+        vm.prank(admin);
+        coordinator.addSlasherContract(slasher3);
+
+        uint256 partialAmt = (stake.MIN_STAKE() * 3000) / 10_000;
+        address[3] memory slashers = [slasher, slasher2, slasher3];
+
+        // Two misses per slasher; the sixth (slasher3, GI 2) escalates globally.
+        for (uint256 gi = 1; gi <= 2; gi++) {
+            for (uint256 k = 0; k < 3; k++) {
+                vm.prank(slashers[k]);
+                stake.slashPartial(validator1, partialAmt, "AUD_NO_VOTE", gi);
+            }
+        }
+        assertEq(stake.s5EscalationEpoch(validator1), 1, "one escalation recorded");
+        assertEq(stake.getPartialSlashGIs(validator1, slasher).length, 0, "other slasher's ring settled");
+        assertEq(stake.getPartialSlashGIs(validator1, slasher2).length, 0, "other slasher's ring settled");
+
+        // Jail served; one new miss on slasher at GI 3.
+        vm.warp(block.timestamp + stake.s5JailDuration() + 1);
+        vm.prank(slasher);
+        uint256 actual = stake.slashPartial(validator1, partialAmt, "AUD_NO_VOTE", 3);
+        assertEq(actual, partialAmt, "pre-escalation misses not counted twice");
+        assertEq(stake.getPartialSlashGIs(validator1, slasher).length, 1, "ring restarts from the new miss");
+        assertEq(stake.s5EscalationEpoch(validator1), 1, "no second escalation");
+    }
+
+    /// @dev A per-slasher escalation also clears the global ring, so it settles
+    ///      the other slashers' rings too, for the same reason.
+    function test_s5_perSlasherEscalation_settlesOtherSlashersRings() public {
+        _setUpSingleValidator(stake.MIN_STAKE() * 20);
+        address slasher2 = _addSecondSlasher();
+
+        uint256 partialAmt = (stake.MIN_STAKE() * 3000) / 10_000;
+        vm.prank(slasher2); stake.slashPartial(validator1, partialAmt, "AUD_NO_VOTE", 1);
+        vm.prank(slasher2); stake.slashPartial(validator1, partialAmt, "AUD_NO_VOTE", 2);
+        // Third miss on slasher escalates through its own ring (global count 5 < 6).
+        for (uint256 gi = 1; gi <= 3; gi++) {
+            vm.prank(slasher);
+            stake.slashPartial(validator1, partialAmt, "AUD_NO_VOTE", gi);
+        }
+        assertEq(stake.s5EscalationEpoch(validator1), 1, "per-slasher escalation recorded");
+
+        vm.warp(block.timestamp + stake.s5JailDuration() + 1);
+        vm.prank(slasher2);
+        uint256 actual = stake.slashPartial(validator1, partialAmt, "AUD_NO_VOTE", 3);
+        assertEq(actual, partialAmt, "slasher2's earlier misses settled by the escalation");
+        assertEq(stake.getPartialSlashGIs(validator1, slasher2).length, 1, "ring restarts from the new miss");
+    }
+
     /// @dev Same-model split: S1 (auditor contract) and S2 (coordinator) are
     ///      separate slashers, so their misses used to sit in separate rings.
     function test_s5Global_addsUpTwoSlashersOfOneModel() public {
