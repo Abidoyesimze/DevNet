@@ -85,7 +85,7 @@ contract DeployPlatform is DeploymentsPath {
     uint256 internal constant DEFAULT_S5_JAIL_DURATION   = 7 days;
     uint256 internal constant DEFAULT_S6_THRESHOLD       = 3;
     uint256 internal constant DEFAULT_S5_GLOBAL_WINDOW   = 7 days;
-    uint256 internal constant DEFAULT_S5_GLOBAL_THRESHOLD= 6;
+    uint256 internal constant DEFAULT_S5_GLOBAL_THRESHOLD = 6;
 
     /// @notice Tokenomics values the deploy applies; see the env keys in the header.
     struct Tokenomics {
