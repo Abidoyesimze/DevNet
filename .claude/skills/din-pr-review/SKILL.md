@@ -194,5 +194,5 @@ new commits since review — still at `<sha>`" if nothing changed.
 ## 6. Merging
 
 Merging is `din-pr-merge`: path A (GitHub-side merge commit by the reviewer,
-the default) or path B (local merge, admins only). Attribution rules for any
+the default) or path B (local merge, Umer only). Attribution rules for any
 commit the merger writes are there too.

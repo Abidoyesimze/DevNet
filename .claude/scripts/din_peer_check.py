@@ -11,7 +11,8 @@ Usage:
   din_peer_check.py issue-approve <N>   may I approve issue <N>'s plan?
   din_peer_check.py issue-close <N>     may I close issue <N> as completed?
   din_peer_check.py task <task-file>    may I close this task's Discussion?
-  din_peer_check.py admin               do I hold the repo admin role (merge path B, bypass)?
+  din_peer_check.py admin               do I hold the repo admin role (emergency bypass)?
+  din_peer_check.py path-b              may I use merge path B? (Umer only, plus the admin role)
 
 Exit status: 0 = OK, 1 = REFUSE (reasons printed), 2 = error.
 
@@ -95,21 +96,26 @@ def add(involved, ident, reason):
         involved.setdefault(person(ident), []).append(reason)
 
 
+def pr_contributors(involved, n, author, suffix=""):
+    """Add PR <n>'s author and every commit author, committer and co-author."""
+    add(involved, author, f"author of PR No. {n}")
+    for c in gh_list(f"repos/{REPO}/pulls/{n}/commits"):
+        sha = c["sha"][:7]
+        if c.get("author"):
+            add(involved, c["author"]["login"], f"authored commit {sha}{suffix}")
+        else:
+            add(involved, c["commit"]["author"]["name"], f"authored commit {sha}{suffix}")
+        if c.get("committer"):
+            add(involved, c["committer"]["login"], f"committed {sha}{suffix}")
+        for ca in co_authors(c["commit"]["message"]):
+            add(involved, ca, f"co-author on {sha}{suffix}")
+
+
 def check_pr(n):
     actor = me()
     pr = gh_json("api", f"repos/{REPO}/pulls/{n}")
     involved = {}
-    add(involved, pr["user"]["login"], f"author of PR No. {n}")
-    for c in gh_list(f"repos/{REPO}/pulls/{n}/commits"):
-        sha = c["sha"][:7]
-        if c.get("author"):
-            add(involved, c["author"]["login"], f"authored commit {sha}")
-        else:
-            add(involved, c["commit"]["author"]["name"], f"authored commit {sha}")
-        if c.get("committer"):
-            add(involved, c["committer"]["login"], f"committed {sha}")
-        for ca in co_authors(c["commit"]["message"]):
-            add(involved, ca, f"co-author on {sha}")
+    pr_contributors(involved, n, pr["user"]["login"])
     return verdict(actor, involved, f"review, approve or merge PR No. {n}")
 
 
@@ -127,7 +133,8 @@ def issue_people(n, closing):
         for e in gh_list(f"repos/{REPO}/issues/{n}/timeline"):
             src = (e.get("source") or {}).get("issue") or {}
             if e.get("event") == "cross-referenced" and (src.get("pull_request") or {}).get("merged_at"):
-                add(involved, src["user"]["login"], f"authored merged PR No. {src['number']}")
+                m = src["number"]
+                pr_contributors(involved, m, src["user"]["login"], f" of merged PR No. {m}")
     return involved
 
 
@@ -160,10 +167,20 @@ def check_admin():
     actor = me()
     role = gh("api", f"repos/{REPO}/collaborators/{actor}/permission", "--jq", ".role_name").strip()
     if role == "admin":
-        print(f"OK: {actor} holds the admin role (merge path B / bypass allowed).")
+        print(f"OK: {actor} holds the admin role (emergency bypass allowed).")
         return 0
     print(f"REFUSE: {actor} has '{role}', not admin. Use merge path A (Developer/MAINTAINING.md No. 4.4).")
     return 1
+
+
+def check_path_b():
+    """Merge path B is Umer only (MAINTAINING No. 4.4), and needs the admin bypass."""
+    actor = me()
+    if person(actor) not in CONFIG["path_b"]:
+        print(f"REFUSE: {actor} ({person(actor)}) can't use merge path B; it's reserved for "
+              f"{', '.join(CONFIG['path_b'])} (Developer/MAINTAINING.md No. 4.4). Use path A.")
+        return 1
+    return check_admin()
 
 
 def main(argv):
@@ -177,6 +194,8 @@ def main(argv):
         return 0
     if cmd == "admin":
         return check_admin()
+    if cmd == "path-b":
+        return check_path_b()
     if not rest:
         print(__doc__)
         return 2

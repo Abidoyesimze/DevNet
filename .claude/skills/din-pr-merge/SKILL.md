@@ -1,6 +1,6 @@
 ---
 name: din-pr-merge
-description: Use when actually merging a PR into InfiniteZeroFoundation/DevNet's `develop` — "merge PR #N", "merge this into develop", or any request to land a PR after it's been reviewed. Any maintainer who isn't the PR's author or a co-author can run it (checked first with `.claude/scripts/din_peer_check.py`). Path A (the default, per Developer/MAINTAINING.md No. 4.4): push any review fixes onto the PR branch, then merge on GitHub with a merge commit once the approval, `CI OK` and up-to-date gates pass. Path B (admins only, exceptional): the local stash-merge-pop flow plus a deviation commit, pushed through `din-push-develop` with the admin bypass. Either way it ends with the merger watching `develop` CI and posting the outcome comment (`outcome-comment.md`). Runs after `din-pr-review`. Not for reviewing a PR (use `din-pr-review`) and not for generic git merges outside this repo's PR workflow.
+description: Use when actually merging a PR into InfiniteZeroFoundation/DevNet's `develop` — "merge PR #N", "merge this into develop", or any request to land a PR after it's been reviewed. Any maintainer who isn't the PR's author or a co-author can run it (checked first with `.claude/scripts/din_peer_check.py`). Path A (the default, per Developer/MAINTAINING.md No. 4.4): push any review fixes onto the PR branch, then merge on GitHub with a merge commit once the approval, `CI OK` and up-to-date gates pass. Path B (Umer only per MAINTAINING No. 4.4, exceptional): the local stash-merge-pop flow plus a deviation commit, pushed through `din-push-develop` with the admin bypass. Either way it ends with the merger watching `develop` CI and posting the outcome comment (`outcome-comment.md`). Runs after `din-pr-review`. Not for reviewing a PR (use `din-pr-review`) and not for generic git merges outside this repo's PR workflow.
 ---
 
 # DIN DevNet PR merge
@@ -17,12 +17,12 @@ setup is [`.claude/scripts/README.md`](../../scripts/README.md).
 
 | | Path A — GitHub-side merge commit | Path B — local merge + deviation commit |
 |---|---|---|
-| Who | Any maintainer who isn't the author or a co-author | Admins only (`din_peer_check.py admin`) |
+| Who | Any maintainer who isn't the author or a co-author | Umer only (MAINTAINING No. 4.4; `din_peer_check.py path-b`) |
 | When | The default, for every PR | Exceptional: the PR needs adapting against a `develop` that has moved (renames, ABI regeneration, docs drift) and pushing fixes onto the PR branch isn't practical |
 | Fixes | Pushed onto the PR branch (or a small follow-up PR); the last-push rule sends the final approval to someone else | A separate deviation commit on top of the merge, on `develop` |
 | Gate | The `develop` ruleset: 1 approval of the latest push, `CI OK`, branch up to date | The admin bypass; log a one-line reason in [Discussion 170](https://github.com/InfiniteZeroFoundation/DevNet/discussions/170) |
 
-Use path A unless the operator explicitly chooses B and is an admin.
+Use path A unless the operator explicitly chooses B and is Umer.
 
 ## 0. Hard rules — both paths
 
@@ -122,10 +122,10 @@ Then the outcome steps: **C1–C2** below.
 
 ---
 
-## Path B — local merge + deviation commit (admins only)
+## Path B — local merge + deviation commit (Umer only)
 
 ```bash
-python3 .claude/scripts/din_peer_check.py admin   # REFUSE → use path A
+python3 .claude/scripts/din_peer_check.py path-b  # REFUSE → use path A
 source .claude/scripts/din-env.sh
 cd "$DIN_REPO"
 ```

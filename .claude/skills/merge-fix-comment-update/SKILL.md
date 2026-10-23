@@ -1,6 +1,6 @@
 ---
 name: merge-fix-comment-update
-description: Use per-file, after `din-pr-review` has posted its verification and merge-proposal comments for a PR — "merge and fix <path>", "apply the fix for <path>", "land <path> per the merge proposal". Input is one relative file path (e.g. `foundry/src/DinCoordinator.sol`); invoke it again for each other file. For that one file it applies the fix described in "Pending proposal" and records what it did in the PR's merge-fix log. Path A (default, any maintainer, Developer/MAINTAINING.md No. 4.4): the fix goes onto the PR branch in the review worktree, and `din-pr-merge` later pushes it onto the PR. Path B (admins only): the PR's diff is applied into the `develop` checkout per "Recommended merge proposal", then the fix on top. Code changes only — it does NOT build, run forge/pytest, commit, or edit the GitHub comment; once every file is through, the operator runs `din-merge-build-test`, which builds/tests everything, fixes until green, and then updates the comment for all files. Stops and asks the operator whenever the row's proposal implies a decision, a conflict, or a judgment call — never guesses through those. Not for merging a whole PR at once (use `din-pr-merge`) and not for the initial review (use `din-pr-review`).
+description: Use per-file, after `din-pr-review` has posted its verification and merge-proposal comments for a PR — "merge and fix <path>", "apply the fix for <path>", "land <path> per the merge proposal". Input is one relative file path (e.g. `foundry/src/DinCoordinator.sol`); invoke it again for each other file. For that one file it applies the fix described in "Pending proposal" and records what it did in the PR's merge-fix log. Path A (default, any maintainer, Developer/MAINTAINING.md No. 4.4): the fix goes onto the PR branch in the review worktree, and `din-pr-merge` later pushes it onto the PR. Path B (Umer only): the PR's diff is applied into the `develop` checkout per "Recommended merge proposal", then the fix on top. Code changes only — it does NOT build, run forge/pytest, commit, or edit the GitHub comment; once every file is through, the operator runs `din-merge-build-test`, which builds/tests everything, fixes until green, and then updates the comment for all files. Stops and asks the operator whenever the row's proposal implies a decision, a conflict, or a judgment call — never guesses through those. Not for merging a whole PR at once (use `din-pr-merge`) and not for the initial review (use `din-pr-review`).
 ---
 
 # Merge-fix-comment-update
@@ -31,7 +31,7 @@ tree over and over. The pipeline is:
 **Where the fix goes depends on the merge path** (MAINTAINING No. 4.4,
 `din-pr-merge`):
 
-| | Path A — default, any maintainer | Path B — admins only |
+| | Path A — default, any maintainer | Path B — Umer only |
 |---|---|---|
 | Target tree (`$TARGET`) | The review worktree `$DIN_WORK/PRs/PRreview_<N>`, on `pr-<N>-review` at the PR head | The `develop` checkout `$DIN_REPO` |
 | The PR's own diff | Already there — skip step 3 | Applied file by file (step 3) |

@@ -1,6 +1,6 @@
 ---
 name: din-merge-build-test
-description: Use once per PR, after `merge-fix-comment-update` has been run on every file of a DevNet PR's merge-proposal comment — "build and test the merge", "run din-merge-build-test", "now test everything and update the comment". Builds and tests the fixed tree the way CI does (forge build on the real via_ir profile, contract size gate, full forge test, pytest -m "not integration", plus ABI regeneration / doc-link check / hardhat when relevant), fixes whatever breaks and re-runs until everything is green, then updates the merge-proposal comment in one edit. Path A (default): runs in the PR's review worktree before the fixes are pushed onto the PR branch, and fills only "Pending proposal" (the merger fills "Actual merge proposal"). Path B (admins only): runs on the uncommitted merged tree in the `develop` checkout and fills both rows. Not needed when a PR merges as-is — its green `CI OK` is the build/test evidence. Never commits or pushes. Not for the per-file code changes (use `merge-fix-comment-update`), the initial review (`din-pr-review`), or the merge itself (`din-pr-merge`).
+description: Use once per PR, after `merge-fix-comment-update` has been run on every file of a DevNet PR's merge-proposal comment — "build and test the merge", "run din-merge-build-test", "now test everything and update the comment". Builds and tests the fixed tree the way CI does (forge build on the real via_ir profile, contract size gate, full forge test, pytest -m "not integration", plus ABI regeneration / doc-link check / hardhat when relevant), fixes whatever breaks and re-runs until everything is green, then updates the merge-proposal comment in one edit. Path A (default): runs in the PR's review worktree before the fixes are pushed onto the PR branch, and fills only "Pending proposal" (the merger fills "Actual merge proposal"). Path B (Umer only, MAINTAINING No. 4.4): runs on the uncommitted merged tree in the `develop` checkout and fills both rows. Not needed when a PR merges as-is — its green `CI OK` is the build/test evidence. Never commits or pushes. Not for the per-file code changes (use `merge-fix-comment-update`), the initial review (`din-pr-review`), or the merge itself (`din-pr-merge`).
 ---
 
 # DIN merge build & test
@@ -30,7 +30,7 @@ Where it runs:
 | | Path A | Path B |
 |---|---|---|
 | `$TARGET` | `$DIN_WORK/PRs/PRreview_<N>` (PR head + uncommitted fixes) | `$DIN_REPO` (uncommitted merge + fixes) |
-| Comment rows it fills | "Pending proposal" only — "Actual merge proposal" stays for the merger (MAINTAINING No. 4.3) | Both — the admin running path B is the merger |
+| Comment rows it fills | "Pending proposal" only — "Actual merge proposal" stays for the merger (MAINTAINING No. 4.3) | Both — Umer, running path B, is the merger |
 
 ## 0. Hard rules
 

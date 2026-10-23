@@ -14,6 +14,7 @@ The rule ([Developer/MAINTAINING.md](../../../Developer/MAINTAINING.md) No. 4.6,
 ## 0. Gate
 
 - **Admins only.** `python3 .claude/scripts/din_peer_check.py admin`. `REFUSE` → don't push; open a PR and use `din-pr-merge` path A.
+  A path B merge push also needs `python3 .claude/scripts/din_peer_check.py path-b` (path B is Umer only, MAINTAINING No. 4.4); other admins push directly only for emergencies.
 - **Only run this after the operator has said to push.** Invoking the skill is not permission to push; the "wait for review before commit/push" rule still applies. If the push request came from a flow like din-pr-merge, make sure the file-by-file review already happened.
 - **Every bypass gets a reason.** Before pushing, have a one-line reason ready (e.g. "path B merge of PR No. N: ABI regeneration against moved develop", "emergency fix for red develop at <sha>"). Step 2 logs it in Discussion 170.
 - Confirm you are pushing `develop` → `origin/develop` from `$DIN_REPO`, and that it is a fast-forward:

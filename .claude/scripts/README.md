@@ -29,9 +29,10 @@ python3 .claude/scripts/din_peer_check.py pr 264              # before reviewing
 python3 .claude/scripts/din_peer_check.py issue-approve 223   # before an approval verdict
 python3 .claude/scripts/din_peer_check.py issue-close 227     # before closing as completed
 python3 .claude/scripts/din_peer_check.py task Developer/tasks/task_240926_17.md
-python3 .claude/scripts/din_peer_check.py admin               # merge path B / bypass needs the admin role
+python3 .claude/scripts/din_peer_check.py admin               # the emergency bypass needs the admin role
+python3 .claude/scripts/din_peer_check.py path-b              # merge path B: Umer only, plus the admin role
 ```
 
 It exits with 0 when the action is OK, 1 when it's refused (the reasons are printed), and 2 on an error.
 
-The check is deliberately conservative. For `issue-close`, the author of any merged PR that cross-references the issue counts as an implementer. If a refusal looks wrong because the mention was incidental, hand the issue to a peer anyway. Don't work around the check.
+The check is deliberately conservative. For `issue-close`, everyone who worked on a merged PR that cross-references the issue counts as an implementer: its author and each commit's author, committer and `Co-Authored-By` co-authors. If a refusal looks wrong because the mention was incidental, hand the issue to a peer anyway. Don't work around the check.
