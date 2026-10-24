@@ -297,7 +297,7 @@ def create_testdataset(
             )
             console.print(
                 f"[yellow]Skipping the test-dataset-assigned flag. Retry just the failed "
-                f"batch(es) with: dincli model-owner task auditor-batches create-testdataset "
+                f"batch(es) with: dincli model-owner auditor-batches create-testdataset "
                 f"{model_id} --submit {retry_flags}[/yellow]"
             )
             raise typer.Exit(1)
