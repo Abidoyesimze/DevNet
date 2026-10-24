@@ -220,7 +220,11 @@ If you are unable to obtain funds through the faucets above, you may also reques
 
 # 🩺 Environment Preflight Check
 
-Before installing or running `dincli`, verify your environment with:
+> **For contributors working from a clone of this repo.** Participants who
+> installed dincli from the wheel (per [setup.md](setup.md)) can skip this
+> section — forge and anvil are not required for network participation.
+
+Before starting development, verify your environment with:
 
 ```bash
 python3 scripts/preflight.py
@@ -239,7 +243,7 @@ The script checks each of the following and prints `[OK]`, `[WARN]`, or `[MISSIN
 
 Exits 0 when all required checks pass; exits 1 on Python version or Foundry failures.
 
-To also verify `.env.<network>`, the configured RPC endpoint, and the IPFS config:
+To also verify the configured RPC endpoint (read from `os.environ` or `.env`, the same lookup dincli uses) and the IPFS config:
 
 ```bash
 python3 scripts/preflight.py --network sepolia_op_devnet

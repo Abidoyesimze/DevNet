@@ -2,23 +2,37 @@
 """
 scripts/preflight.py — environment preflight check for DevNet contributors.
 
+For contributors working from a clone of this repo. Participants who installed
+dincli from the wheel (per Documentation/public/setup.md) can skip this script
+— forge and anvil are not in their setup requirements.
+
 Stdlib-only for the core checks (Python, forge, anvil, node_modules, package
-importability).  Pass --network <name> to also verify .env.<name>, the
-configured RPC endpoint, and the IPFS config (requires a working dincli install).
+importability).  Pass --network <name> to also verify the configured RPC
+endpoint and the IPFS config (requires a working dincli install).
 
 Exit 0  — all required checks passed (warnings may still be printed).
 Exit 1  — at least one required check failed.
 """
+from __future__ import annotations
+
 import argparse
 import importlib
 import json
+import os
 import shutil
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Expected chain IDs per network (WARN on mismatch, not hard fail)
+_EXPECTED_CHAIN_IDS: dict[str, int] = {
+    "sepolia_op_devnet": 11155420,
+    "local": 1337,
+}
 
 # ── output helpers ────────────────────────────────────────────────────────────
 
@@ -74,7 +88,7 @@ def _check_importable(module: str, package: str, optional: bool = False) -> None
     try:
         importlib.import_module(module)
         _ok(f"{package} importable")
-    except ImportError:
+    except Exception:  # catches ImportError, OSError (native libs), etc.
         if optional:
             _warn(
                 f"{package} not importable (optional — pytest skips torch-dependent tests without it)",
@@ -87,54 +101,54 @@ def _check_importable(module: str, package: str, optional: bool = False) -> None
             )
 
 
+def _sanitize_url(url: str) -> str:
+    """Return URL with path, query, and credentials stripped — safe for logging."""
+    try:
+        p = urllib.parse.urlparse(url)
+        netloc = p.hostname or ""
+        if p.port:
+            netloc += f":{p.port}"
+        return urllib.parse.urlunparse((p.scheme, netloc, "***", "", "", ""))
+    except Exception:
+        return "<url>"
+
+
 # ── network checks (require --network, may use dincli) ────────────────────────
 
-def _network_checks(network: str) -> int:
-    failures = 0
-    env_file = _REPO_ROOT / f".env.{network}"
-
-    if not env_file.exists():
-        _warn(
-            f".env.{network} not found",
-            fix=f"Copy .env.{network}.example and fill in your RPC URL and private keys",
-        )
-        return failures  # can't proceed without the env file
-
-    _ok(f".env.{network} found")
-
-    rpc_url = _read_env_value(env_file, f"{network.upper()}_RPC_URL")
-    if not rpc_url:
-        _warn(
-            f"No RPC URL in .env.{network}",
-            fix=f"Set {network.upper()}_RPC_URL=<url> in .env.{network}",
-        )
-    else:
-        failures += _check_rpc(rpc_url)
-
-    try:
-        from dincli.services.ipfs import resolve_ipfs_config
-        resolve_ipfs_config()
-        _ok("resolve_ipfs_config() succeeded")
-    except ImportError:
-        _warn("dincli not importable — skipping IPFS config check", fix="pip install -e .")
-    except Exception as exc:
-        _warn(f"IPFS config not resolved: {exc}", fix="Configure IPFS_NODE_URL or Filebase credentials in .env")
-
-    return failures
-
-
 def _read_env_value(env_file: Path, key: str) -> str:
-    prefix = key + "="
-    with open(env_file) as fh:
+    """Read a single env var value from a .env-style file (dotenv-compatible)."""
+    with open(env_file, encoding="utf-8") as fh:
         for line in fh:
             stripped = line.strip()
-            if stripped.startswith(prefix):
-                return stripped[len(prefix):].strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            # strip optional 'export ' prefix
+            if stripped.startswith("export "):
+                stripped = stripped[7:].lstrip()
+            if "=" not in stripped:
+                continue
+            k, _, v = stripped.partition("=")
+            if k.strip() != key:
+                continue
+            v = v.strip()
+            # quoted value: extract between matching quotes
+            if v and v[0] in ('"', "'"):
+                quote = v[0]
+                end = v.find(quote, 1)
+                return v[1:end] if end != -1 else v[1:]
+            # unquoted: strip trailing inline comment (` #` pattern)
+            comment_idx = v.find(" #")
+            if comment_idx != -1:
+                v = v[:comment_idx].rstrip()
+            return v
     return ""
 
 
-def _check_rpc(url: str) -> int:
-    payload = json.dumps({"jsonrpc": "2.0", "method": "eth_chainId", "params": [], "id": 1}).encode()
+def _check_rpc(url: str, network: str | None = None) -> int:
+    safe_url = _sanitize_url(url)
+    payload = json.dumps(
+        {"jsonrpc": "2.0", "method": "eth_chainId", "params": [], "id": 1}
+    ).encode()
     try:
         req = urllib.request.Request(
             url,
@@ -144,11 +158,99 @@ def _check_rpc(url: str) -> int:
         with urllib.request.urlopen(req, timeout=5) as resp:
             result = json.loads(resp.read())
         chain_id = int(result["result"], 16)
-        _ok(f"RPC reachable: {url}  (chainId {chain_id})")
-        return 0
+        expected = _EXPECTED_CHAIN_IDS.get(network or "") if network else None
+        if expected is not None and chain_id != expected:
+            _warn(
+                f"RPC reachable: {safe_url}  (chainId {chain_id}, expected {expected} for {network})",
+                fix=f"Verify {network.upper()}_RPC_URL points at the right network",
+            )
+        else:
+            _ok(f"RPC reachable: {safe_url}  (chainId {chain_id})")
+    except Exception:
+        _warn(f"RPC not reachable: {safe_url}", fix="Check your RPC URL and internet connection")
+    return 0  # RPC connectivity is advisory — never a hard failure
+
+
+def _check_ipfs_config() -> int:
+    """Check that the resolved IPFSConfig has the required fields for its provider."""
+    try:
+        from dincli.services.ipfs import resolve_ipfs_config  # type: ignore[import]
+        from dincli.cli.utils import IPFSConfig  # type: ignore[import]
+        cfg: IPFSConfig = resolve_ipfs_config()
+        provider = cfg.provider
+        if provider == "env":
+            missing = [
+                v for v, f in (
+                    ("IPFS_API_URL_ADD",      cfg.api_url_add),
+                    ("IPFS_API_URL_RETRIEVE", cfg.api_url_retrieve),
+                ) if not f
+            ]
+            if missing:
+                _warn(
+                    f"IPFS env provider: {', '.join(missing)} not set",
+                    fix=(
+                        "Set IPFS_API_URL_ADD / IPFS_API_URL_RETRIEVE in .env, "
+                        "or run: dincli system configure-ipfs"
+                    ),
+                )
+            else:
+                _ok("IPFS config resolved (env provider)")
+        elif provider == "filebase":
+            if not cfg.api_key:
+                _warn(
+                    "IPFS filebase provider: ipfs_api_key not configured",
+                    fix="dincli system configure-ipfs --provider filebase",
+                )
+            else:
+                _ok("IPFS config resolved (filebase provider)")
+        elif provider == "custom":
+            if not cfg.service_path:
+                _warn(
+                    "IPFS custom provider: ipfs_service_path not configured",
+                    fix="dincli system configure-ipfs --provider custom --service-path <path>",
+                )
+            else:
+                _ok("IPFS config resolved (custom provider)")
+        else:
+            _ok(f"IPFS config resolved ({provider} provider)")
+    except ImportError:
+        _warn("dincli not importable — skipping IPFS config check", fix="pip install -e .")
     except Exception as exc:
-        _warn(f"RPC not reachable ({url}): {exc}", fix="Check your RPC URL and internet connection")
-        return 0  # network connectivity is always a warning, not a hard failure
+        _warn(f"IPFS config not resolved: {exc}", fix="dincli system configure-ipfs")
+    return 0  # IPFS config is advisory
+
+
+def _network_checks(network: str) -> int:
+    failures = 0
+    env_key = f"{network.upper()}_RPC_URL"
+
+    # Resolve RPC URL the same way dincli does: os.environ → .env
+    rpc_url = os.environ.get(env_key, "")
+    if not rpc_url:
+        env_file = _REPO_ROOT / ".env"
+        if env_file.exists():
+            rpc_url = _read_env_value(env_file, env_key)
+
+    # Also check for a network-specific file and warn if absent
+    net_env_file = _REPO_ROOT / f".env.{network}"
+    if not net_env_file.exists():
+        _warn(
+            f".env.{network} not found",
+            fix=f"Copy .env.example to .env.{network} and fill in {env_key}",
+        )
+
+    if not rpc_url:
+        _warn(
+            f"No RPC URL found for {network} (checked os.environ and .env)",
+            fix=f"Set {env_key}=<url> in .env",
+        )
+    else:
+        failures += _check_rpc(rpc_url, network=network)
+
+    # IPFS check is independent of the env file — always run it
+    failures += _check_ipfs_config()
+
+    return failures
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -193,8 +295,9 @@ def main() -> None:
     parser.add_argument(
         "--network", metavar="NAME",
         help=(
-            "Also check .env.<NAME>, the configured RPC endpoint, and the IPFS config. "
-            "Requires a working dincli install for the IPFS check. "
+            "Also verify the configured RPC endpoint and IPFS config for NAME. "
+            "Reads <NAME_UPPER>_RPC_URL from os.environ then .env (same lookup "
+            "dincli uses). Requires a working dincli install for the IPFS check. "
             "Example values: local, sepolia_op_devnet."
         ),
     )
