@@ -2414,6 +2414,11 @@
     },
     {
       "type": "error",
+      "name": "TC_EvalPhaseNotClosed",
+      "inputs": []
+    },
+    {
+      "type": "error",
       "name": "TC_FailedToCreateAuditorsBatches",
       "inputs": []
     },
