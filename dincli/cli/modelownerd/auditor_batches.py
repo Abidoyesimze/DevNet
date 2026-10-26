@@ -11,7 +11,7 @@ from eth_abi.packed import encode_packed
 from eth_account.messages import encode_defunct
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from dincli.cli.utils import CONFIG_DIR, build_and_send_tx, ensure_batch_seed_locked, get_manifest_key, require_custom_manifest_service, resolve_manifest_path
+from dincli.cli.utils import CONFIG_DIR, GIstateToStr, build_and_send_tx, ensure_batch_seed_locked, get_manifest_key, require_custom_manifest_service, resolve_manifest_path
 from dincli.services.cid_utils import get_bytes32_from_cid, get_cid_from_bytes32
 
 auditor_batches_app = typer.Typer(help="Auditor Batches commands")
@@ -170,7 +170,28 @@ def create_testdataset(
 
     ref_gi = ctx.obj.validate_gi_ET_curr_GI(gi, curr_GI)
 
-    ctx.obj.validate_GIstate_ET_given_GIstate(GIstate, "AuditorsBatchesCreated", "Can not create test dataset at this time")
+    # Richer GI states (task_061026_21, not always present -- see git history
+    # around issues #243/#272/#273/#287) advance GIstate to
+    # AuditTestDataAssigned once setTestDataAssignedFlag succeeds on-chain.
+    # When that state exists and is current, the flag is already set and
+    # there is nothing left for this command to do -- treat it the same way
+    # as the informational "already set" case below, rather than falling
+    # through to the exact-match gate (which would otherwise reject a safe
+    # re-run with a generic "wrong state" error, contradicting the
+    # re-run-safety documented on this command).
+    curr_GIstate_str = GIstate if isinstance(GIstate, str) else GIstateToStr(GIstate)
+    if curr_GIstate_str == "AuditTestDataAssigned":
+        console.print(
+            "[yellow]Test dataset already assigned and the flag already set for this "
+            "GI (GIstate is AuditTestDataAssigned) — nothing further to do.[/yellow]"
+        )
+        return
+    if curr_GIstate_str != "AuditorsBatchesCreated":
+        console.print(
+            f"[bold red]✗ Can not create test dataset at this time. "
+            f"Current state: {curr_GIstate_str} [/bold red]"
+        )
+        raise typer.Exit(1)
 
     console.print(f"[bold green]Creating test dataset![/bold green]")
 

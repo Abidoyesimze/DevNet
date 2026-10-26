@@ -9,7 +9,14 @@ from web3 import Web3
 
 from dincli.cli.context import DinContext
 from dincli.cli.modelownerd import auditor_batches as atb
+from dincli.cli.utils import GIstatestrToIndex
 from dincli.main import app as main_app
+
+# Resolved dynamically (not hardcoded) so these tests stay correct whether or
+# not the richer GI-states lifecycle (task_061026_21) is merged on whatever
+# develop snapshot this runs against -- the ordinal for this state name shifts
+# depending on that.
+_AUDITOR_BATCHES_CREATED_ORDINAL = GIstatestrToIndex("AuditorsBatchesCreated")
 
 runner = CliRunner()
 
@@ -96,7 +103,7 @@ class DummyTaskCoordinatorFunctions:
 
 
 class DummyTaskCoordinatorContract:
-    def __init__(self, gi=0, gi_state=0, flag_call_raises=None):
+    def __init__(self, gi=0, gi_state=_AUDITOR_BATCHES_CREATED_ORDINAL, flag_call_raises=None):
         self.gi = gi
         self.gi_state = gi_state
         self.flag_call_raises = flag_call_raises
@@ -412,6 +419,62 @@ def test_cli_batch_retry_only_sends_listed_batches_then_flag(monkeypatch, tmp_pa
     assign_calls = [c for c in sent if isinstance(c, tuple) and c[0] == "assignAuditTestDataset"]
     assert [c[1] for c in assign_calls] == [1]
     assert any(not isinstance(c, tuple) for c in sent)
+
+
+def test_cli_batch_retry_with_two_distinct_batches_then_flag(monkeypatch, tmp_path):
+    coordinator = DummyTaskCoordinatorContract()
+    auditor = DummyTaskAuditorContract(batch_count=3)
+    _patch_context_methods(monkeypatch, tmp_path, coordinator, auditor)
+
+    sent = []
+
+    def fake_build_and_send_tx(ctx, contract_function, action_msg, success_msg, error_msg, *a, **kw):
+        sent.append(contract_function)
+        return SimpleNamespace(transactionHash=b"\xab" * 32)
+
+    monkeypatch.setattr(atb, "build_and_send_tx", fake_build_and_send_tx)
+
+    result = runner.invoke(main_app, _cli_args(1, _make_test_data_file(tmp_path), batch=[0, 2]))
+
+    assert result.exit_code == 0, result.output
+    assign_calls = [c for c in sent if isinstance(c, tuple) and c[0] == "assignAuditTestDataset"]
+    assert [c[1] for c in assign_calls] == [0, 2]
+    assert any(not isinstance(c, tuple) for c in sent)
+
+
+def test_cli_rerun_after_state_advanced_to_audit_test_data_assigned(monkeypatch, tmp_path):
+    """Once the richer GI-states lifecycle (task_061026_21) is live,
+    setTestDataAssignedFlag succeeding advances GIstate to
+    AuditTestDataAssigned. A safe re-run must recognise that state directly
+    and report "already done" without touching the exact-match state gate
+    (which would otherwise reject it with a generic wrong-state error,
+    contradicting the documented re-run safety) -- and without any batch
+    creation/assignment/flag work being attempted. This drives
+    create_testdataset's own dual-state check directly -- that check no
+    longer calls the generic validate_GIstate_ET_given_GIstate at all for
+    this command, so it can't be masked by that helper being mocked
+    elsewhere. Only GIstateToStr itself is substituted, so the scenario is
+    exercisable regardless of whether this develop snapshot currently has
+    the richer states merged.
+    """
+    coordinator = DummyTaskCoordinatorContract(gi_state=999)
+    auditor = DummyTaskAuditorContract(batch_count=3)
+    _patch_context_methods(monkeypatch, tmp_path, coordinator, auditor)
+
+    monkeypatch.setattr(
+        atb, "GIstateToStr",
+        lambda gi_state: "AuditTestDataAssigned" if gi_state == 999 else "AuditorsBatchesCreated",
+    )
+
+    def fail_if_called(*a, **kw):
+        raise AssertionError("must not send any transaction once already past this state")
+
+    monkeypatch.setattr(atb, "build_and_send_tx", fail_if_called)
+
+    result = runner.invoke(main_app, _cli_args(1, _make_test_data_file(tmp_path)))
+
+    assert result.exit_code == 0, result.output
+    assert "already set" in result.output.lower() or "nothing further to do" in result.output.lower()
 
 
 def test_cli_flag_already_set_is_informational_exit_0(monkeypatch, tmp_path):
