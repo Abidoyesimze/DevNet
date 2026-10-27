@@ -212,7 +212,10 @@ def _check_ipfs_config() -> int:
             else:
                 _ok("IPFS config resolved (custom provider)")
         else:
-            _ok(f"IPFS config resolved ({provider} provider)")
+            _warn(
+                f"IPFS unknown provider '{provider}' — IPFS operations will fail",
+                fix="dincli system configure-ipfs",
+            )
     except ImportError:
         _warn("dincli not importable — skipping IPFS config check", fix="pip install -e .")
     except Exception as exc:
@@ -224,25 +227,20 @@ def _network_checks(network: str) -> int:
     failures = 0
     env_key = f"{network.upper()}_RPC_URL"
 
-    # Resolve RPC URL the same way dincli does: os.environ → .env
+    # Resolve RPC URL the same way dincli does: os.environ → .env in cwd
     rpc_url = os.environ.get(env_key, "")
     if not rpc_url:
-        env_file = _REPO_ROOT / ".env"
+        env_file = Path.cwd() / ".env"
         if env_file.exists():
-            rpc_url = _read_env_value(env_file, env_key)
-
-    # Also check for a network-specific file and warn if absent
-    net_env_file = _REPO_ROOT / f".env.{network}"
-    if not net_env_file.exists():
-        _warn(
-            f".env.{network} not found",
-            fix=f"Copy .env.example to .env.{network} and fill in {env_key}",
-        )
+            try:
+                rpc_url = _read_env_value(env_file, env_key)
+            except Exception as exc:
+                _warn(f".env read failed: {exc} — skipping .env lookup")
 
     if not rpc_url:
         _warn(
-            f"No RPC URL found for {network} (checked os.environ and .env)",
-            fix=f"Set {env_key}=<url> in .env",
+            f"No RPC URL found for {network} (checked os.environ and .env in cwd)",
+            fix=f"Set {env_key}=<url> in .env in your working directory",
         )
     else:
         failures += _check_rpc(rpc_url, network=network)
@@ -296,9 +294,9 @@ def main() -> None:
         "--network", metavar="NAME",
         help=(
             "Also verify the configured RPC endpoint and IPFS config for NAME. "
-            "Reads <NAME_UPPER>_RPC_URL from os.environ then .env (same lookup "
-            "dincli uses). Requires a working dincli install for the IPFS check. "
-            "Example values: local, sepolia_op_devnet."
+            "Reads <NAME_UPPER>_RPC_URL from os.environ then .env in the current "
+            "working directory (same lookup dincli uses). Requires a working dincli "
+            "install for the IPFS check. Example values: local, sepolia_op_devnet."
         ),
     )
     args = parser.parse_args()

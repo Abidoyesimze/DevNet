@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import types
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
@@ -128,7 +129,9 @@ def test_env_reader_accepts_dotenv_assignment_forms(tmp_path, assignment, expect
 
 
 def test_missing_network_env_still_checks_ipfs(monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(preflight, "_REPO_ROOT", tmp_path)
+    """IPFS check must run even when there is no RPC URL in env or cwd/.env."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LOCAL_RPC_URL", raising=False)
     checked = []
     monkeypatch.setattr(preflight, "_check_ipfs_config", lambda: checked.append(True) or 0)
 
@@ -136,8 +139,77 @@ def test_missing_network_env_still_checks_ipfs(monkeypatch, tmp_path, capsys):
 
     assert checked == [True]
     output = capsys.readouterr().out
-    assert ".env.local not found" in output
-    assert "Copy .env.example to .env.local" in output
+    assert "No RPC URL found" in output
+
+
+def test_env_read_from_cwd_not_repo_root(monkeypatch, tmp_path, capsys):
+    """RPC URL must be read from .env in the current working directory, not the
+    repository root (which may differ when dincli is installed from a wheel)."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("LOCAL_RPC_URL=https://rpc.example/cwd-sentinel\n", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LOCAL_RPC_URL", raising=False)
+
+    rpc_calls: list[str] = []
+    monkeypatch.setattr(preflight, "_check_rpc", lambda url, **kw: rpc_calls.append(url) or 0)
+    monkeypatch.setattr(preflight, "_check_ipfs_config", lambda: 0)
+
+    preflight._network_checks("local")
+
+    assert rpc_calls == ["https://rpc.example/cwd-sentinel"], (
+        "_network_checks must read .env from cwd, not from the repository root"
+    )
+
+
+def test_env_read_failure_still_runs_ipfs_check(monkeypatch, tmp_path, capsys):
+    """.env decode errors must produce a warning and not abort the IPFS check."""
+    env_file = tmp_path / ".env"
+    env_file.write_bytes(b"\xff\xfe invalid utf-8 \xff")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LOCAL_RPC_URL", raising=False)
+
+    checked: list[bool] = []
+    monkeypatch.setattr(preflight, "_check_ipfs_config", lambda: checked.append(True) or 0)
+
+    preflight._network_checks("local")
+
+    assert checked == [True], "IPFS check must run even when .env read fails"
+    output = capsys.readouterr().out
+    assert "[WARN]" in output
+
+
+def test_unknown_ipfs_provider_warns(monkeypatch, capsys):
+    """An unrecognised IPFS provider must produce a [WARN], not an [OK]."""
+
+    class _FakeCfg:
+        provider = "unknown_backend"
+        api_url_add = ""
+        api_url_retrieve = ""
+        api_key = ""
+        service_path = ""
+
+    fake_ipfs = types.ModuleType("dincli.services.ipfs")
+    fake_ipfs.resolve_ipfs_config = lambda: _FakeCfg()
+    fake_utils = types.ModuleType("dincli.cli.utils")
+    fake_utils.IPFSConfig = _FakeCfg
+
+    for mod_name, mod_obj in (
+        ("dincli", types.ModuleType("dincli")),
+        ("dincli.services", types.ModuleType("dincli.services")),
+        ("dincli.services.ipfs", fake_ipfs),
+        ("dincli.cli", types.ModuleType("dincli.cli")),
+        ("dincli.cli.utils", fake_utils),
+    ):
+        monkeypatch.setitem(sys.modules, mod_name, mod_obj)
+
+    preflight._check_ipfs_config()
+
+    output = capsys.readouterr().out
+    assert "[WARN]" in output, "unknown provider must produce a warning"
+    assert "unknown_backend" in output
+    assert "[OK]" not in output
 
 
 def test_run_annotations_are_postponed_for_python_39_compatibility():
