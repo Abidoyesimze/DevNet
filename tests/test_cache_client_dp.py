@@ -431,6 +431,80 @@ def _load_manifest_dp():
     return dp
 
 
+def _make_reference_dataset(n_per_class: int = 100, seed: int = 0):
+    """Structured synthetic 28×28 dataset for 10 classes.
+
+    Class k activates flattened pixel positions [k*78 : (k+1)*78] with
+    value 1.0; all other pixels are 0 plus Gaussian noise (std=0.02).
+    The ten segments are non-overlapping, making the task linearly
+    separable.  The fully-connected model achieves 100 % accuracy within
+    20 epochs at lr=0.01 (combined weight norm ≈ 9.1, below the manifest's
+    clipping_norm=10.0 so clipping is still a no-op).
+
+    Returns (x, y): x float32 (N, 1, 28, 28), y int64 (N,), shuffled.
+    """
+    rng = torch.Generator().manual_seed(seed)
+    images, labels = [], []
+    for k in range(10):
+        for _ in range(n_per_class):
+            flat = torch.zeros(784)
+            flat[k * 78:(k + 1) * 78] = 1.0
+            flat += 0.02 * torch.randn(784, generator=rng)
+            images.append(flat.view(1, 28, 28))
+            labels.append(k)
+    x = torch.stack(images)
+    y = torch.tensor(labels, dtype=torch.long)
+    perm = torch.randperm(len(y), generator=rng)
+    return x[perm], y[perm]
+
+
+def _evaluate_accuracy(model_module, state_dict, x, y):
+    """Return fraction of correct predictions (correct / total)."""
+    m = model_module.ModelArchitecture()
+    m.load_state_dict(state_dict)
+    m.eval()
+    with torch.no_grad():
+        preds = m(x).argmax(dim=1)
+    return (preds == y).float().mean().item()
+
+
+def _build_and_train_reference(n_per_class=100, num_epochs=20, lr=0.01, seed=42):
+    """Train on structured reference data; return (ref_sd, trained_sd, x_test, y_test).
+
+    Uses _make_reference_dataset with an 80/20 train/test split.
+    The model achieves >95 % test accuracy — high enough to measure
+    accuracy changes from clipping and noise independently.
+    """
+    model_module = load_model_module()
+    criterion = nn.CrossEntropyLoss()
+
+    x_all, y_all = _make_reference_dataset(n_per_class=n_per_class, seed=seed)
+    n_train = int(0.8 * len(x_all))
+    x_train, y_train = x_all[:n_train], y_all[:n_train]
+    x_test, y_test = x_all[n_train:], y_all[n_train:]
+
+    torch.manual_seed(seed)
+    model = model_module.ModelArchitecture()
+    ref_sd = {k: v.detach().clone() for k, v in model.state_dict().items()}
+
+    batch_size = 32
+    rng = torch.Generator().manual_seed(seed)
+    for _ in range(num_epochs):
+        perm = torch.randperm(len(x_train), generator=rng)
+        for start in range(0, len(x_train) - batch_size + 1, batch_size):
+            idx = perm[start:start + batch_size]
+            loss = criterion(model(x_train[idx]), y_train[idx])
+            loss.backward()
+            with torch.no_grad():
+                for p in model.parameters():
+                    if p.grad is not None:
+                        p -= lr * p.grad
+                        p.grad.zero_()
+
+    trained_sd = {k: v.detach().clone() for k, v in model.state_dict().items()}
+    return ref_sd, trained_sd, x_test, y_test
+
+
 def _prediction_agreement(model_module, sd_a, sd_b, x):
     """Fraction of inputs where sd_a and sd_b produce identical argmax predictions."""
     def _predict(sd):
@@ -486,13 +560,16 @@ def test_real_weights_combined_norm_fits_manifest_clipping_norm():
 
 
 def test_clip_only_at_manifest_clipping_norm_preserves_model_outputs():
-    """Clip-only at the manifest's clipping_norm must leave model predictions
-    unchanged (amendment No. 2-3 accuracy evidence, clip-only comparison).
+    """Clip-only at the manifest's clipping_norm must not degrade test accuracy
+    (amendment No. 2-3 accuracy evidence, clip-only comparison).
 
-    Since the trained combined norm (≈ 8.2) is below clipping_norm (10.0),
-    clip_state_dict is a no-op and every test-set prediction must agree with
-    the baseline.  With the old clipping_norm=1.0 the scale factor was ≈ 0.12,
-    so predictions changed substantially.
+    Trains on structured reference data (10 classes, linearly separable) and
+    evaluates on a held-out labeled test split.  Since the trained combined
+    norm (≈ 8.2) is below clipping_norm (10.0), clip_state_dict is a no-op
+    and clip-only accuracy must match baseline accuracy exactly.
+
+    With the old clipping_norm=1.0 the scale factor was ≈ 0.12 (88 % of each
+    weight discarded), which would sharply reduce test accuracy.
     """
     client = load_client_module()
     model_module = load_model_module()
@@ -500,35 +577,45 @@ def test_clip_only_at_manifest_clipping_norm_preserves_model_outputs():
     manifest_clipping_norm = dp["parameters"]["clipping_norm"]
     clip_scope = dp["parameters"]["clip_scope"]
 
-    _ref_sd, trained_sd = _build_and_train()
+    _ref_sd, trained_sd, x_test, y_test = _build_and_train_reference()
+
+    baseline_acc = _evaluate_accuracy(model_module, trained_sd, x_test, y_test)
+    assert baseline_acc > 0.85, (
+        f"Reference training did not converge: baseline accuracy {baseline_acc:.3f}. "
+        "Increase num_epochs in _build_and_train_reference."
+    )
 
     clipped_sd = client.clip_state_dict(trained_sd, manifest_clipping_norm, clip_scope)
+    clip_acc = _evaluate_accuracy(model_module, clipped_sd, x_test, y_test)
 
-    torch.manual_seed(0)
-    x_test = torch.randn(200, 1, 28, 28)
-    agreement = _prediction_agreement(model_module, trained_sd, clipped_sd, x_test)
-
-    assert agreement == pytest.approx(1.0, abs=0.0), (
-        f"Clip-only prediction agreement is {agreement:.3f}; "
-        f"clipping_norm={manifest_clipping_norm} clips the trained model. "
+    assert clip_acc == pytest.approx(baseline_acc, abs=0.0), (
+        f"Clip-only accuracy ({clip_acc:.3f}) differs from baseline ({baseline_acc:.3f}); "
+        f"clipping_norm={manifest_clipping_norm} over-clips the trained model. "
         "The combined norm must be below clipping_norm."
+    )
+
+    print(
+        f"\n[Clip accuracy report] baseline={baseline_acc:.3f}, "
+        f"clip_only={clip_acc:.3f} (clipping_norm={manifest_clipping_norm})"
     )
 
 
 def test_manifest_dp_full_noise_impact():
-    """Documents the noise impact of the manifest's DP parameters
+    """Documents the accuracy impact of the manifest's DP parameters
     (amendment No. 2-3 accuracy evidence, full-DP comparison).
 
-    The manifest has dp.enabled=False; noise_multiplier=0.5 was chosen to keep
-    σ=0.5 under the old clipping_norm=1.0 config.  At clipping_norm=10.0 it
-    gives σ=5.0 (noise_multiplier × clipping_norm), which substantially
-    perturbs model outputs.
+    Trains on structured reference data and evaluates baseline, clip-only,
+    and post-DP accuracy on a held-out labeled test split so the utility
+    tradeoff is expressed as correct/total accuracy rather than prediction
+    agreement between models.
 
-    This test reports the prediction agreement between the unperturbed model and
-    the post-DP model so the documentation's noise guidance is based on
-    measured evidence.  Reducing noise_multiplier proportionally (to ~0.05)
-    preserves σ≈0.5 and restores model utility, but does not preserve equivalent
-    DP protection — that tradeoff requires separate privacy assessment.
+    The manifest has dp.enabled=False; noise_multiplier=0.5 was chosen to
+    keep σ=0.5 under the old clipping_norm=1.0 config.  At clipping_norm=10.0
+    it gives σ=5.0 (noise_multiplier × clipping_norm), which dwarfs typical
+    parameter magnitudes (≈ 0.025) and collapses accuracy to near-chance.
+
+    Reducing noise_multiplier proportionally (to ~0.05) would restore σ≈0.5
+    and recover utility — that tradeoff requires a separate privacy assessment.
     """
     client = load_client_module()
     model_module = load_model_module()
@@ -537,33 +624,36 @@ def test_manifest_dp_full_noise_impact():
     noise_multiplier = dp["parameters"]["noise_multiplier"]
     noise_std        = noise_multiplier * clipping_norm
 
-    _ref_sd, trained_sd = _build_and_train()
+    _ref_sd, trained_sd, x_test, y_test = _build_and_train_reference()
 
-    torch.manual_seed(0)
-    x_test = torch.randn(200, 1, 28, 28)
+    baseline_acc = _evaluate_accuracy(model_module, trained_sd, x_test, y_test)
+    assert baseline_acc > 0.85, (
+        f"Reference training did not converge: baseline accuracy {baseline_acc:.3f}."
+    )
+
+    clipped_sd = client.clip_state_dict(trained_sd, clipping_norm, dp["parameters"]["clip_scope"])
+    clip_acc = _evaluate_accuracy(model_module, clipped_sd, x_test, y_test)
 
     torch.manual_seed(42)
     dp_sd = client.apply_dp_mechanism(trained_sd, dp)
 
-    # Outputs must be finite after full DP.
     for key, tensor in dp_sd.items():
         if torch.is_tensor(tensor) and torch.is_floating_point(tensor):
             assert torch.isfinite(tensor).all(), f"Non-finite values in '{key}' after DP"
 
-    agreement = _prediction_agreement(model_module, trained_sd, dp_sd, x_test)
+    dp_acc = _evaluate_accuracy(model_module, dp_sd, x_test, y_test)
 
-    # With σ=5.0 and typical parameter magnitudes ≈ 0.025 (SNR ≪ 1), predictions
-    # should diverge substantially from the unperturbed baseline.
-    assert agreement < 0.5, (
-        f"Expected σ={noise_std:.1f} to substantially perturb predictions, "
-        f"but prediction agreement with baseline is {agreement:.3f}. "
+    # With σ=5.0 (SNR ≪ 1) accuracy must drop well below baseline.
+    assert dp_acc < baseline_acc - 0.3, (
+        f"Expected σ={noise_std:.1f} to degrade accuracy by >30 pp, but "
+        f"post-DP accuracy ({dp_acc:.3f}) is too close to baseline ({baseline_acc:.3f}). "
         "Review the manifest's noise_multiplier setting."
     )
 
     print(
-        f"\n[DP noise report] noise_std={noise_std:.2f} "
+        f"\n[DP accuracy report] noise_std={noise_std:.2f} "
         f"(noise_multiplier={noise_multiplier} × clipping_norm={clipping_norm}); "
-        f"prediction agreement with baseline: {agreement:.3f}"
+        f"baseline={baseline_acc:.3f}, clip_only={clip_acc:.3f}, post_dp={dp_acc:.3f}"
     )
 
 
