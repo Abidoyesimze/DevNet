@@ -431,31 +431,67 @@ def _load_manifest_dp():
     return dp
 
 
-def _make_reference_dataset(n_per_class: int = 100, seed: int = 0):
-    """Structured synthetic 28×28 dataset for 10 classes.
+def _load_test_dataset():
+    """Load cache_model_0/dataset/test/test_dataset.pt without torchvision.
 
-    Class k activates flattened pixel positions [k*78 : (k+1)*78] with
-    value 1.0; all other pixels are 0 plus Gaussian noise (std=0.02).
-    The ten segments are non-overlapping, making the task linearly
-    separable.  The fully-connected model achieves 100 % accuracy within
-    20 epochs at lr=0.01 (combined weight norm ≈ 9.1, below the manifest's
-    clipping_norm=10.0 so clipping is still a no-op).
-
-    Returns (x, y): x float32 (N, 1, 28, 28), y int64 (N,), shuffled.
+    Stubs the five torchvision classes referenced in the pickle so the raw
+    tensors can be recovered without the torchvision package being installed
+    (CI only installs torch).  Returns (x, y): x float32 (N, 1, 28, 28)
+    normalised to [0, 1], y int64 (N,).
     """
-    rng = torch.Generator().manual_seed(seed)
-    images, labels = [], []
-    for k in range(10):
-        for _ in range(n_per_class):
-            flat = torch.zeros(784)
-            flat[k * 78:(k + 1) * 78] = 1.0
-            flat += 0.02 * torch.randn(784, generator=rng)
-            images.append(flat.view(1, 28, 28))
-            labels.append(k)
-    x = torch.stack(images)
-    y = torch.tensor(labels, dtype=torch.long)
-    perm = torch.randperm(len(y), generator=rng)
-    return x[perm], y[perm]
+    import sys
+    import types
+
+    class _VD:
+        def __setstate__(self, d):
+            self.__dict__.update(d)
+
+    class _MNIST(_VD):
+        pass
+
+    class _ST(_VD):
+        pass
+
+    class _Compose(_VD):
+        pass
+
+    class _ToTensor(_Compose):
+        pass
+
+    class _Normalize(_Compose):
+        pass
+
+    stub_specs = [
+        ("torchvision",                           {}),
+        ("torchvision.datasets",                  {}),
+        ("torchvision.datasets.mnist",            {"MNIST": _MNIST}),
+        ("torchvision.datasets.vision",           {"StandardTransform": _ST}),
+        ("torchvision.transforms",                {}),
+        ("torchvision.transforms.transforms",     {"Compose": _Compose, "ToTensor": _ToTensor, "Normalize": _Normalize}),
+    ]
+    added = {}
+    for name, attrs in stub_specs:
+        if name not in sys.modules:
+            m = types.ModuleType(name)
+            m.__path__ = []
+            m.__package__ = name
+            for attr, cls in attrs.items():
+                setattr(m, attr, cls)
+            sys.modules[name] = m
+            added[name] = m
+
+    try:
+        dataset_path = (
+            Path(__file__).resolve().parents[1]
+            / "cache_model_0" / "dataset" / "test" / "test_dataset.pt"
+        )
+        obj = torch.load(dataset_path, weights_only=False)
+        x = obj.data.float().unsqueeze(1) / 255.0
+        y = obj.targets.clone()
+        return x, y
+    finally:
+        for name in added:
+            sys.modules.pop(name, None)
 
 
 def _evaluate_accuracy(model_module, state_dict, x, y):
@@ -468,32 +504,41 @@ def _evaluate_accuracy(model_module, state_dict, x, y):
     return (preds == y).float().mean().item()
 
 
-def _build_and_train_reference(n_per_class=100, num_epochs=20, lr=0.01, seed=42):
-    """Train on structured reference data; return (ref_sd, trained_sd, x_test, y_test).
+def _build_and_train_reference(n_samples=2000, num_epochs=20, lr=0.01, seed=42):
+    """Train on a seeded subset of cache_model_0/dataset/test/test_dataset.pt.
 
-    Uses _make_reference_dataset with an 80/20 train/test split.
-    The model achieves >95 % test accuracy — high enough to measure
-    accuracy changes from clipping and noise independently.
+    Loads the committed MNIST test split (10 000 images), draws n_samples with
+    a fixed seed, uses 80 % for training and 20 % for held-out evaluation.
+    Returns (ref_sd, trained_sd, x_test, y_test).
+
+    Measured (seed=42, n_samples=2000, 20 epochs, lr=0.01,
+    from dataset/test/test_dataset.pt):
+      post-training combined L2 norm  ≈  9.44
+      baseline accuracy               ≈  0.86
     """
     model_module = load_model_module()
     criterion = nn.CrossEntropyLoss()
 
-    x_all, y_all = _make_reference_dataset(n_per_class=n_per_class, seed=seed)
-    n_train = int(0.8 * len(x_all))
-    x_train, y_train = x_all[:n_train], y_all[:n_train]
-    x_test, y_test = x_all[n_train:], y_all[n_train:]
+    x_all, y_all = _load_test_dataset()
+    rng_sample = torch.Generator().manual_seed(seed)
+    idx = torch.randperm(len(x_all), generator=rng_sample)[:n_samples]
+    x_sub, y_sub = x_all[idx], y_all[idx]
+
+    n_train = int(0.8 * n_samples)
+    x_train, y_train = x_sub[:n_train], y_sub[:n_train]
+    x_test, y_test = x_sub[n_train:], y_sub[n_train:]
 
     torch.manual_seed(seed)
     model = model_module.ModelArchitecture()
     ref_sd = {k: v.detach().clone() for k, v in model.state_dict().items()}
 
     batch_size = 32
-    rng = torch.Generator().manual_seed(seed)
+    rng_train = torch.Generator().manual_seed(seed)
     for _ in range(num_epochs):
-        perm = torch.randperm(len(x_train), generator=rng)
+        perm = torch.randperm(len(x_train), generator=rng_train)
         for start in range(0, len(x_train) - batch_size + 1, batch_size):
-            idx = perm[start:start + batch_size]
-            loss = criterion(model(x_train[idx]), y_train[idx])
+            batch_idx = perm[start:start + batch_size]
+            loss = criterion(model(x_train[batch_idx]), y_train[batch_idx])
             loss.backward()
             with torch.no_grad():
                 for p in model.parameters():
@@ -569,7 +614,7 @@ def test_clip_only_at_manifest_clipping_norm_preserves_model_outputs():
     and clip-only accuracy must match baseline accuracy exactly.
 
     With the old clipping_norm=1.0 the scale factor was ≈ 0.12 (88 % of each
-    weight discarded), which would sharply reduce test accuracy.
+    weight discarded), truncating the combined weight norm from ≈ 8.6 to 1.0.
     """
     client = load_client_module()
     model_module = load_model_module()
@@ -615,7 +660,8 @@ def test_manifest_dp_full_noise_impact():
     parameter magnitudes (≈ 0.025) and collapses accuracy to near-chance.
 
     Reducing noise_multiplier proportionally (to ~0.05) would restore σ≈0.5
-    and recover utility — that tradeoff requires a separate privacy assessment.
+    (noise_multiplier × clipping_norm); whether that preserves model utility
+    is not evaluated here and requires a separate assessment.
     """
     client = load_client_module()
     model_module = load_model_module()
