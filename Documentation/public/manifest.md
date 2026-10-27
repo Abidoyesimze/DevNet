@@ -134,8 +134,8 @@ The optional `dp` block controls whether trained weights are clipped and noised 
 
 | Mechanism | What is clipped | Guidance |
 |-----------|----------------|----------|
-| `post_training_gaussian` / `post_training_laplace` | Combined L2 norm of all final weights | Set to at least the model's combined weight norm. For the reference cache_model_0 architecture (~8.2), use **≥ 10.0**. Too small a value discards most of the model. |
-| `update_gaussian` | Combined L2 norm of the per-round weight delta | The delta is much smaller than the absolute weights. For cache_model_0 with typical training settings, the delta norm is ≈ 0.18. **1.0 – 2.0** is appropriate. |
+| `post_training_gaussian` / `post_training_laplace` | Combined L2 norm of all final weights | Set to at least the model's combined weight norm. For the reference cache_model_0 architecture (measured ≈ 9.44 with seed=42, 2000 MNIST samples, 20 epochs, lr=0.01), use **≥ 10.0**. Too small a value discards most of the model. |
+| `update_gaussian` | Combined L2 norm of the per-round weight delta | The delta is the per-round weight change, not the absolute weights. For cache_model_0 (seed=42, 2000 MNIST samples, 20 epochs, lr=0.01), the measured delta norm is ≈ 3.62. **≥ 4.0** is appropriate for those settings; adjust based on your own training configuration. |
 
 > **Note**: raising `clipping_norm` to stop over-clipping also raises the noise by the same factor. If you increase `clipping_norm`, lower `noise_multiplier` proportionally to keep the absolute noise standard deviation unchanged (note: this does not preserve equivalent DP privacy protection — a larger `clipping_norm` provides weaker privacy at the same σ; privacy assessment is needed separately).
 

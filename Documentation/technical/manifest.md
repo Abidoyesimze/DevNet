@@ -159,12 +159,12 @@ The two mechanism families clip fundamentally different quantities, so the right
 
 | Mechanism | What is clipped | Typical norm (cache_model_0) | Recommended `clipping_norm` |
 |-----------|----------------|------------------------------|-----------------------------|
-| `post_training_gaussian` / `post_training_laplace` | Combined L2 norm of all final weights | ≈ 8.2 (3-layer FC, seed 42) | ≥ 10.0 |
-| `update_gaussian` | Combined L2 norm of the per-round weight delta | ≈ 0.18 (3 epochs × 30 batches, lr=0.01) | 1.0 – 2.0 |
+| `post_training_gaussian` / `post_training_laplace` | Combined L2 norm of all final weights | ≈ 9.44 (seed=42, 2000 MNIST samples, 20 epochs, lr=0.01) | ≥ 10.0 |
+| `update_gaussian` | Combined L2 norm of the per-round weight delta | ≈ 3.62 (seed=42, 2000 MNIST samples, 20 epochs, lr=0.01) | ≥ 4.0 |
 
-Using `clipping_norm: 1.0` with `post_training_*` and `clip_scope: global` clips the combined weight norm from ≈ 8.2 down to 1.0 — a scale factor of ≈ 0.12 — which discards 88% of each weight and substantially degrades model predictions (see `test_clip_only_at_manifest_clipping_norm_preserves_model_outputs` for measured evidence). Raising `clipping_norm` to cover the actual combined norm stops the destructive clipping, but raises the noise by the same factor (`noise_scale = noise_multiplier × clipping_norm`), so `noise_multiplier` should be reduced proportionally to keep the same absolute noise standard deviation σ. Note: reducing `noise_multiplier` proportionally preserves σ but does not preserve equivalent DP privacy — a larger `clipping_norm` provides weaker privacy at the same σ because the sensitivity bound is larger. The right tradeoff requires separate privacy assessment.
+Using `clipping_norm: 1.0` with `post_training_*` and `clip_scope: global` clips the combined weight norm from ≈ 9.44 down to 1.0 — a scale factor of ≈ 0.11 — discarding 89% of each weight before noise is applied. Raising `clipping_norm` to cover the actual combined norm stops the destructive clipping, but raises the noise by the same factor (`noise_scale = noise_multiplier × clipping_norm`), so `noise_multiplier` should be reduced proportionally to keep the same absolute noise standard deviation σ. Note: reducing `noise_multiplier` proportionally preserves σ but does not preserve equivalent DP privacy — a larger `clipping_norm` provides weaker privacy at the same σ because the sensitivity bound is larger. The right tradeoff requires separate privacy assessment.
 
-`update_gaussian` clips only the round-to-round weight delta, not the absolute weights, so a much smaller `clipping_norm` suffices and `clipping_norm: 1.0` already leaves typical deltas unclipped.
+`update_gaussian` clips only the round-to-round weight delta, not the absolute weights. The right `clipping_norm` depends on training settings; for the reference configuration (seed=42, 2000 MNIST samples, 20 epochs, lr=0.01) the measured delta is ≈ 3.62, so `clipping_norm=4.0` leaves it unclipped. Adjust for your own training duration and dataset.
 
 **Privacy is off unless you turn it on.** A manifest with no `dp` block, or
 with `dp.enabled: false`, uploads raw trained weights with no clipping and no
