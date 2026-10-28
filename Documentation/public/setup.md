@@ -32,20 +32,26 @@ source venv/bin/activate
 ```bash
 git clone https://github.com/InfiniteZeroFoundation/DevNet.git
 cd DevNet
+git checkout develop
 pip install -e .
 ```
 
-`-e` (editable) installs `dincli` from the repository you just cloned, so it
-always matches the code on `develop` and doesn't depend on a packaged
-release artifact.
+Cloning alone checks out `main`, not `develop` — the explicit `git checkout
+develop` matters. `-e` (editable) installs `dincli` from whatever commit is
+checked out *at install time*; it does not automatically track upstream
+updates afterwards. If `develop` moves on, re-run `git pull` in that same
+clone to pick up the changes (no reinstall needed).
 
 > [!NOTE]
-> Installing a packaged wheel (`pip install dincli-*.whl`) or directly from
-> GitHub's `dist/` subdirectory is tracked separately
-> ([issue #282](https://github.com/InfiniteZeroFoundation/DevNet/issues/282))
-> — the previous instructions here pointed at a wheel file and a `dist/`
-> layout that no longer match what's published. Use the source install above
-> until that's resolved.
+> This is unreleased code from `develop`, not a packaged release — it can be
+> ahead of what's actually deployed on the live `sepolia_op_devnet` network
+> (see [issue #282](https://github.com/InfiniteZeroFoundation/DevNet/issues/282)
+> for the plan to bring main's packaged release up to date with develop and
+> fix this install path to point at a real release asset instead). Installing
+> a packaged wheel (`pip install dincli-*.whl`) or directly from GitHub's
+> `dist/` subdirectory is broken today — the previous instructions here
+> pointed at a wheel file and a `dist/` layout that no longer match what's
+> published — so use the source install above until #282 lands.
 
 > for any missing dependency please install it using pip. Please see a complete dependency list in [requirements.txt](../../cache_model_0/requirements.txt)
 

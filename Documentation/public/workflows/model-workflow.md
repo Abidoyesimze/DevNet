@@ -5,7 +5,7 @@ In this guide we will describe the workflow of the DIN Protocol for a model.
 In Model Workflow there are 5 main entities:
 
 1. Model-Owner
-2. DIN-Representative (later DIN-DAO)
+2. DIN-Representative
 3. Auditors
 4. Aggregators
 5. Clients (Model-Trainees)
@@ -197,7 +197,7 @@ Model Owner updates the manifest file at `<root_dir>/tasks/sepolia_op_devnet/<ta
 Model Owner then registers the model with the DIN Protocol at the DINModelRegistry contract using the following dincli command:
 
 ```bash
-dincli task model-owner register-request --isOpenSource [true/false]
+dincli task model-owner register-request [--isOpenSource]
 ```
 
 Once the model is registered, the model is assigned a model ID. The manifest file may be updated with the model id field `Model ID` and uploaded to IPFS again. Other fields in manifest file can also be updated as per requirement. The following dincli command can be used to update the model CID in DINModelRegistry contract:

@@ -14,17 +14,25 @@ This file is the minimal setup entrypoint for contributors working on DevNet.
 
 ```bash
 git checkout develop
-pip install -e .
+pip install -e ".[test]"
 ```
 
-If you are working on the ML or DP service code, make sure your environment also contains the training dependencies used by the current model services, including PyTorch and the test runner you intend to use.
+The `[test]` extra installs `pytest` and `torch`, which the unit test suite
+needs even outside the ML/DP service code.
 
-Run the Python test suite:
+Run the unit test suite the same way CI's Python job does — `-m "not
+integration"` excludes `tests/dincli/`'s integration harness, which needs a
+live Hardhat node, IPFS daemon, and Docker, and which otherwise autouse-starts
+and restarts local chain/IPFS processes as a side effect of being collected:
 
 ```bash
-pytest                                        # run all tests
-pytest tests/test_dintoken.py -k test_name    # run a single test
+pytest -m "not integration" -q                              # run all unit tests
+pytest tests/test_dintoken.py -k test_name -m "not integration"   # run a single test
 ```
+
+To run the full integration suite instead (with its prerequisites and a
+disposable environment), see the
+[dincli testing guide](../Documentation/technical/testing/dincli-testing-guide.md).
 
 ## Foundry (Solidity) Setup
 

@@ -45,7 +45,7 @@ dincli model-owner add-slasher --taskAuditor [--contract <task_coordinator_addre
 
 ### Protocol Fees
 
-The DIN protocol charges fees to submit model registration and manifest update requests. Fees are held by the registry contract and can only be withdrawn by the DAO admin.
+The DIN protocol charges fees to submit model registration and manifest update requests. Fees are held by the registry contract and can only be withdrawn by the DIN-Representative.
 
 Fees apply regardless of whether the request is approved or rejected (spam protection).
 
@@ -86,9 +86,15 @@ Submit your model to the registry. Requires the registration fee (see [Protocol 
 dincli task model-owner register-request \
   --taskCoordinator <coordinator_address> \
   --taskAuditor <auditor_address> \
-  [--manifestpath <path_to_manifest.json> | --manifestCID <manifest_cid>] \
+  [--manifestpath <path_to_manifest.json>] \
   [--isOpenSource]
 ```
+
+> [!WARNING]
+> Use `--manifestpath`, not `--manifestCID`. Passing `--manifestCID` directly
+> to `register-request` currently crashes with an `UnboundLocalError` before
+> any transaction is sent — see
+> [issue #295](https://github.com/InfiniteZeroFoundation/DevNet/issues/295).
 
 On success you receive a **`requestId`**. Track it to monitor approval status.
 

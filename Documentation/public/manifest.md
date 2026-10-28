@@ -19,7 +19,13 @@ For example:
 ```
 
 > [!NOTE]
-> If the manifest file is absent when the genesis setup (`dincli model-owner model create-genesis-model`) runs, it is automatically created with default values from the default manifest CID (`bafybeibbhrefnamky7vmgcrhfx4ptxb3bdemh5dtnvwfkpualoganvnuve`).
+> The manifest file must already exist at this path before running
+> `dincli model-owner model create-genesis-model` — it exits with an error if
+> the file is missing, it is not created automatically. To create it from a
+> default template, run `dincli model-owner task cache-default-artifacts`
+> first; that only works where the configured network has a `default_manifest`
+> CID set (currently just `local` — `sepolia_op_devnet` and `mainnet` have no
+> default to cache from, so you must supply your own manifest file there).
 
 ---
 
