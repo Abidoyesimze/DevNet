@@ -57,7 +57,7 @@ Fees apply regardless of whether the request is approved or rejected (spam prote
 View current fees:
 
 ```bash
-dincli system get-fees
+dincli system get-registry-fee
 ```
 
 ---
@@ -83,40 +83,37 @@ Model registration is a **two-step process**. The Model Owner submits a request;
 Submit your model to the registry. Requires the registration fee (see [Protocol Fees](#protocol-fees) above).
 
 ```bash
-# TODO
-dincli model-owner registry request-registration \
-  --manifest <path_to_manifest_cid_bytes32> \
-  --task-coordinator <coordinator_address> \
-  --task-auditor <auditor_address> \
-  [--open-source]
+dincli task model-owner register-request \
+  --taskCoordinator <coordinator_address> \
+  --taskAuditor <auditor_address> \
+  [--manifestpath <path_to_manifest.json> | --manifestCID <manifest_cid>] \
+  [--isOpenSource]
 ```
 
 On success you receive a **`requestId`**. Track it to monitor approval status.
 
-### Step 2 — Wait for DAO Approval
+### Step 2 — Wait for DIN-Representative Approval
 
 The DIN-Representative reviews your request and calls `approveModel(requestId)`. You will receive a **`modelId`** once approved.
 
 Check the status of your request:
 
 ```bash
-# TODO
-dincli model-owner registry show-request <requestId>
+dincli task model-owner show-registration-request <requestId>
 ```
 
 > [!IMPORTANT]
-> The coordinator and auditor contracts must remain registered slashers and still be owned by your address at the time the DAO approves. If either condition changes, the approval will revert and you must submit a new request.
+> The coordinator and auditor contracts must remain registered slashers and still be owned by your address at the time the DIN-Representative approves. If either condition changes, the approval will revert and you must submit a new request.
 
 ### Updating a Manifest
 
 Manifest updates also follow a request/approval flow. The model must not be disabled.
 
 ```bash
-# TODO
-dincli model-owner registry request-manifest-update <model_id> --manifest <new_manifest_cid_bytes32>
+dincli task model-owner update-manifest-request <model_id> [--manifestpath <path_to_manifest.json> | --manifestCID <manifest_cid>]
 ```
 
-The DAO reviews the request and calls `approveManifestUpdate(requestId)` to apply it.
+The DIN-Representative reviews the request and calls `approveManifestUpdate(requestId)` to apply it.
 
 ---
 
@@ -131,7 +128,7 @@ Uploads the genesis model to IPFS.
 > **Prerequisite** — `<NETWORK>_DINTaskCoordinator_Contract_Address` must be set in your `.env` file.
 
 ```bash
-dincli model-owner model create-genesis
+dincli model-owner model create-genesis-model
 ```
 
 ### Submit Genesis Model
@@ -143,7 +140,7 @@ Registers the genesis model on-chain.
 > `<project_root>/tasks/<network>/task_<coordinator_address>/dataset/test/test_dataset.pt`
 
 ```bash
-dincli model-owner model submit-genesis [--taskCoordinator <address>] [--ipfs-hash <hash>] [--score <score>]
+dincli model-owner model submit-genesis-model [--taskCoordinator <address>] [--ipfs-hash <hash>] [--score <score>]
 ```
 
 | Option | Required | Description |

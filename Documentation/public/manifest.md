@@ -19,7 +19,7 @@ For example:
 ```
 
 > [!NOTE]
-> If the manifest file is absent when the genesis setup (`dincli task model-owner create-genesis`) runs, it is automatically created with default values from the default manifest CID (`bafybeibbhrefnamky7vmgcrhfx4ptxb3bdemh5dtnvwfkpualoganvnuve`).
+> If the manifest file is absent when the genesis setup (`dincli model-owner model create-genesis-model`) runs, it is automatically created with default values from the default manifest CID (`bafybeibbhrefnamky7vmgcrhfx4ptxb3bdemh5dtnvwfkpualoganvnuve`).
 
 ---
 
@@ -39,7 +39,7 @@ For example:
 
 | Field | Required | Description |
 |---|---|---|
-| `Genesis_Model_CID` | Yes | IPFS CID of the genesis model. Set after running `dincli model-owner model create-genesis` |
+| `Genesis_Model_CID` | Yes | IPFS CID of the genesis model. Set after running `dincli model-owner model create-genesis-model` |
 | `DINTaskCoordinator_Contract` | Yes | Address of the deployed TaskCoordinator contract |
 | `DINTaskAuditor_Contract` | Yes | Address of the deployed TaskAuditor contract |
 | `dp` | No | Nested Differential Privacy configuration block used by services at runtime |
@@ -121,5 +121,5 @@ Please find the example/template manifest file at [cache_model_0/manifest.json](
 Once the model is registered and assigned a model ID, the manifest file should be updated with the `Model ID` field and re-uploaded to IPFS. The following dincli command can be used to update the model CID in the DINModelRegistry contract:
 
 ```bash
-dincli task model-owner update-manifest <model_id> [--modelCID <model_cid>] [--manifestpath <manifest_path>]
+dincli task model-owner update-manifest-request <model_id> [--manifestCID <manifest_cid>] [--manifestpath <manifest_path>]
 ```

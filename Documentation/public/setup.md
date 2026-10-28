@@ -27,20 +27,25 @@ source venv/bin/activate
 
 ## 2. Install `dincli`
 
-### Option A — Install from a Downloaded Wheel
+### Install from Source (recommended for now)
 
 ```bash
-# Download the wheel file
-wget https://github.com/InfiniteZeroFoundation/DevNet/raw/refs/heads/main/dist/dincli-0.1.0-py3-none-any.whl
-# Install it
-pip install dincli-0.1.0-py3-none-any.whl
+git clone https://github.com/InfiniteZeroFoundation/DevNet.git
+cd DevNet
+pip install -e .
 ```
 
-### Option B — Install Directly from GitHub
+`-e` (editable) installs `dincli` from the repository you just cloned, so it
+always matches the code on `develop` and doesn't depend on a packaged
+release artifact.
 
-```bash
-pip install git+https://github.com/InfiniteZeroFoundation/devnet.git@main#subdirectory=dist
-```
+> [!NOTE]
+> Installing a packaged wheel (`pip install dincli-*.whl`) or directly from
+> GitHub's `dist/` subdirectory is tracked separately
+> ([issue #282](https://github.com/InfiniteZeroFoundation/DevNet/issues/282))
+> — the previous instructions here pointed at a wheel file and a `dist/`
+> layout that no longer match what's published. Use the source install above
+> until that's resolved.
 
 > for any missing dependency please install it using pip. Please see a complete dependency list in [requirements.txt](../../cache_model_0/requirements.txt)
 
@@ -70,12 +75,15 @@ Creates the required `config` and `cache` directories and generates an empty con
 # Disable demo mode to use your own wallet and private keys
 dincli system configure-demo --mode no
 
-# Set the default network  [local | sepolia_devnet | sepolia_op_devnet | mainnet]
+# Set the default network  [local | sepolia_op_devnet]
 dincli system configure-network --network sepolia_op_devnet
+```
 
 > [!NOTE]
-> Use `sepolia_op_devnet` for devnet. Testnet and Mainnet support will be rolled out in a future release.
+> `sepolia_op_devnet` is the live DevNet. `local` is for a self-hosted
+> `anvil` chain. `sepolia_devnet` and `mainnet` are not available yet.
 
+```bash
 # Set the log level  [debug | info | warning | error | critical]
 dincli system configure-logging --level info
 ```
