@@ -40,7 +40,7 @@ For issue-specific contributor packets, review questions, and curated reading li
 
 ## Submitting PRs
 
-- Reference related issues
+- Reference related issues. Write `Closes #N` only if the PR completes everything issue N asks (it then closes automatically on merge); otherwise write `Part of #N`
 - Clear description of what and why
 - Add tests where applicable
 - Keep commits focused
