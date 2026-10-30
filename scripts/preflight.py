@@ -80,7 +80,7 @@ def _check_node_modules() -> int:
         _ok("foundry/node_modules present")
         return 0
     else:
-        _warn(
+        _missing(
             "foundry/node_modules not found — forge test will race fetching @openzeppelin/upgrades-core",
             fix="cd foundry && npm ci",
         )
@@ -99,7 +99,7 @@ def _check_importable(module: str, package: str, optional: bool = False) -> int:
                 fix="pip install -e .[test]",
             )
         else:
-            _warn(
+            _missing(
                 f"{package} not importable",
                 fix="pip install -e .",
             )
@@ -179,7 +179,7 @@ def _check_rpc(url: str, network: str | None = None) -> int:
         else:
             _ok(f"RPC reachable: {safe_url}  (chainId {chain_id})")
     except Exception:
-        _warn(f"RPC not reachable: {safe_url}", fix="Check your RPC URL and internet connection")
+        _missing(f"RPC not reachable: {safe_url}", fix="Check your RPC URL and internet connection")
         return 1
     return 0
 
@@ -199,7 +199,7 @@ def _check_ipfs_config() -> int:
                 ) if not f
             ]
             if missing:
-                _warn(
+                _missing(
                     f"IPFS env provider: {', '.join(missing)} not set",
                     fix=(
                         "Set IPFS_API_URL_ADD / IPFS_API_URL_RETRIEVE in .env, "
@@ -211,7 +211,7 @@ def _check_ipfs_config() -> int:
                 return 0
         elif provider == "filebase":
             if not cfg.api_key:
-                _warn(
+                _missing(
                     "IPFS filebase provider: ipfs_api_key not configured",
                     fix="dincli system configure-ipfs --provider filebase",
                 )
@@ -220,7 +220,7 @@ def _check_ipfs_config() -> int:
                 return 0
         elif provider == "custom":
             if not cfg.service_path:
-                _warn(
+                _missing(
                     "IPFS custom provider: ipfs_service_path not configured",
                     fix="dincli system configure-ipfs --provider custom --service-path <path>",
                 )
@@ -228,14 +228,14 @@ def _check_ipfs_config() -> int:
                 _ok("IPFS config resolved (custom provider)")
                 return 0
         else:
-            _warn(
+            _missing(
                 "IPFS unknown provider — IPFS operations will fail",
                 fix="dincli system configure-ipfs",
             )
     except ImportError:
-        _warn("dincli not importable — skipping IPFS config check", fix="pip install -e .")
+        _missing("dincli not importable — IPFS configuration cannot be checked", fix="pip install -e .")
     except Exception:
-        _warn("IPFS config not resolved", fix="dincli system configure-ipfs")
+        _missing("IPFS config not resolved", fix="dincli system configure-ipfs")
     return 1
 
 
@@ -254,7 +254,7 @@ def _network_checks(network: str) -> int:
             _warn(".env lookup failed — skipping .env lookup")
 
     if not rpc_url:
-        _warn(
+        _missing(
             f"No RPC URL found for {network} (checked os.environ and .env in cwd)",
             fix=f"Set {env_key}=<url> in .env in your working directory",
         )

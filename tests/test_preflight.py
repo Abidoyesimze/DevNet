@@ -31,7 +31,10 @@ class TestMissingBinaries:
     def test_missing_forge_prints_missing_tag(self, standalone):
         root, _, run = standalone
         result = run({"PATH": str(root / "empty-path")})
-        assert "[MISSING]" in result.stdout
+        assert "[MISSING] forge not found on PATH" in result.stdout
+        assert "[MISSING] anvil not found on PATH" in result.stdout
+        assert result.stdout.count("[MISSING]") == 2
+        assert "2 required check(s) failed" in result.stdout
 
     def test_missing_forge_mentions_foundry(self, standalone):
         root, _, run = standalone
@@ -89,6 +92,8 @@ def test_standalone_success_without_optional_torch(standalone):
     result = run()
     assert result.returncode == 0, result.stdout + result.stderr
     assert "[WARN]   torch not importable (optional" in result.stdout
+    assert result.stdout.count("[WARN]") == 1
+    assert "[MISSING]" not in result.stdout
     assert "All required checks passed" in result.stdout
     assert result.stderr == ""
 
@@ -98,7 +103,8 @@ def test_standalone_missing_node_modules_exits_one(standalone):
     (root / "foundry" / "node_modules").rmdir()
     result = run()
     assert result.returncode == 1
-    assert "foundry/node_modules not found" in result.stdout
+    assert "[MISSING] foundry/node_modules not found" in result.stdout
+    assert result.stdout.count("[MISSING]") == 1
     assert "1 required check(s) failed" in result.stdout
     assert "All required checks passed" not in result.stdout
 
@@ -113,6 +119,9 @@ def test_standalone_required_import_failure_continues(standalone, module, error)
     result = run()
     assert result.returncode == 1
     assert "1 required check(s) failed" in result.stdout
+    package = {"eth_account": "eth-account", "multibase": "py-multibase", "web3": "web3"}[module]
+    assert f"[MISSING] {package} not importable" in result.stdout
+    assert result.stdout.count("[MISSING]") == 1
     for other, package in (
         ("eth_account", "eth-account"),
         ("multibase", "py-multibase"),
@@ -144,7 +153,9 @@ def test_import_time_oserror_is_advisory_and_does_not_abort(monkeypatch, capsys)
 
     assert preflight._check_importable("torch", "torch", optional=True) == 0
 
-    assert "[WARN]" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "[WARN]   torch not importable (optional" in output
+    assert "[MISSING]" not in output
 
 
 def test_rpc_success_output_does_not_expose_credentials(monkeypatch, capsys):
@@ -165,6 +176,8 @@ def test_rpc_success_output_does_not_expose_credentials(monkeypatch, capsys):
 
     assert preflight._check_rpc(url) == 0
     output = capsys.readouterr().out
+    assert "[OK]     RPC reachable:" in output
+    assert "[MISSING]" not in output
     assert secret not in output
     assert url not in output
     assert "chainId 1" in output
@@ -181,6 +194,8 @@ def test_rpc_failure_output_does_not_expose_credentials_or_exception(monkeypatch
 
     assert preflight._check_rpc(url) == 1
     output = capsys.readouterr().out
+    assert "[MISSING] RPC not reachable:" in output
+    assert output.count("[MISSING]") == 1
     assert secret not in output
     assert url not in output
     assert "failed for" not in output
@@ -212,7 +227,8 @@ def test_missing_network_env_still_checks_ipfs(monkeypatch, tmp_path, capsys):
 
     assert checked == [True]
     output = capsys.readouterr().out
-    assert "No RPC URL found" in output
+    assert "[MISSING] No RPC URL found for local" in output
+    assert output.count("[MISSING]") == 1
 
 
 def test_env_read_from_cwd_not_repo_root(monkeypatch, tmp_path, capsys):
@@ -250,18 +266,22 @@ def test_env_read_failure_still_runs_ipfs_check(monkeypatch, tmp_path, capsys):
 
     assert checked == [True], "IPFS check must run even when .env read fails"
     output = capsys.readouterr().out
-    assert "[WARN]" in output
+    assert "[WARN]   .env lookup failed — skipping .env lookup" in output
+    assert output.count("[WARN]") == 1
+    assert "[MISSING] No RPC URL found for local" in output
+    assert output.count("[MISSING]") == 1
 
 
-def test_unknown_ipfs_provider_warns(ipfs_resolver, capsys):
-    """An unrecognised IPFS provider must produce a [WARN], not an [OK]."""
+def test_unknown_ipfs_provider_fails(ipfs_resolver, capsys):
+    """An unrecognised IPFS provider is a required-check failure."""
     ipfs_resolver.return_value = types.SimpleNamespace(
         provider="SENTINEL_PROVIDER_SECRET\nINJECTED_PROVIDER_LINE",
     )
     result = preflight._check_ipfs_config()
     output = capsys.readouterr().out
-    assert "[WARN]" in output, "unknown provider must produce a warning"
-    assert "IPFS unknown provider" in output
+    assert "[MISSING] IPFS unknown provider — IPFS operations will fail" in output
+    assert output.count("[MISSING]") == 1
+    assert "[WARN]" not in output
     assert "SENTINEL_PROVIDER_SECRET" not in output
     assert "INJECTED_PROVIDER_LINE" not in output
     assert "[OK]" not in output
@@ -312,10 +332,13 @@ def rpc_response(monkeypatch):
         )
     ],
 ])
-def test_invalid_rpc_response_fails(rpc_response, response):
+def test_invalid_rpc_response_fails(rpc_response, capsys, response):
     reply, _ = rpc_response
     reply.read.return_value = response
     assert preflight._check_rpc("https://rpc.example") == 1
+    output = capsys.readouterr().out
+    assert "[MISSING] RPC not reachable:" in output
+    assert output.count("[MISSING]") == 1
 
 
 @pytest.mark.parametrize("quantity", ["0x0", "0x1", "0xAbCdEf", "0x539"])
@@ -330,7 +353,10 @@ def test_chain_id_mismatch_remains_advisory(rpc_response, capsys):
     reply, _ = rpc_response
     reply.read.return_value = b'{"result":"0x1"}'
     assert preflight._check_rpc("https://rpc.example", "local") == 0
-    assert "expected 1337" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "[WARN]   RPC reachable:" in output
+    assert "expected 1337" in output
+    assert "[MISSING]" not in output
 
 
 @pytest.fixture
@@ -365,7 +391,15 @@ def test_ipfs_provider_required_fields(
     values.update(fields)
     ipfs_resolver.return_value = types.SimpleNamespace(provider=provider, **values)
     assert preflight._check_ipfs_config() == expected
-    assert "SENTINEL_IPFS_SECRET" not in capsys.readouterr().out
+    output = capsys.readouterr().out
+    if expected:
+        assert f"[MISSING] IPFS {provider} provider" in output
+        assert output.count("[MISSING]") == 1
+    else:
+        assert f"[OK]     IPFS config resolved ({provider} provider)" in output
+        assert "[MISSING]" not in output
+    assert "[WARN]" not in output
+    assert "SENTINEL_IPFS_SECRET" not in output
 
 
 @pytest.mark.parametrize("error", [ImportError, OSError, ValueError])
@@ -374,14 +408,23 @@ def test_unresolved_ipfs_fails_without_exposing_exception(
     ipfs_resolver.side_effect = error("SENTINEL_IPFS_SECRET")
     assert preflight._check_ipfs_config() == 1
     output = capsys.readouterr().out
-    assert "[WARN]" in output
+    message = (
+        "dincli not importable — IPFS configuration cannot be checked"
+        if error is ImportError else "IPFS config not resolved"
+    )
+    assert f"[MISSING] {message}" in output
+    assert output.count("[MISSING]") == 1
+    assert "[WARN]" not in output
     assert "SENTINEL_IPFS_SECRET" not in output
 
 
 def test_unimportable_dincli_fails_ipfs(monkeypatch, capsys):
     monkeypatch.setitem(sys.modules, "dincli.services.ipfs", None)
     assert preflight._check_ipfs_config() == 1
-    assert "dincli not importable" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "[MISSING] dincli not importable — IPFS configuration cannot be checked" in output
+    assert output.count("[MISSING]") == 1
+    assert "[WARN]" not in output
 
 
 @pytest.mark.parametrize(("rpc_failure", "ipfs_failure", "expected"), [
@@ -425,8 +468,10 @@ def test_env_lookup_exception_is_sanitized_and_still_checks_ipfs(
     rpc.assert_not_called()
     ipfs.assert_called_once_with()
     output = capsys.readouterr().out
-    assert "[WARN]" in output
-    assert output.count("No RPC URL found") == 1
+    assert "[WARN]   .env lookup failed — skipping .env lookup" in output
+    assert output.count("[WARN]") == 1
+    assert "[MISSING] No RPC URL found for local" in output
+    assert output.count("[MISSING]") == 1
     assert "SENTINEL_ENV_SECRET" not in output
     assert "INJECTED_ENV_LINE" not in output
 
@@ -477,6 +522,7 @@ def test_real_network_failures_reach_main_and_continue_ipfs(
         transport.assert_called_once()
     output = capsys.readouterr().out
     assert f"{expected} required check(s) failed" in output
+    assert output.count("[MISSING]") == expected
     assert "All required checks passed" not in output
     assert "SENTINEL_NETWORK_SECRET" not in output
 
@@ -492,4 +538,8 @@ def test_failed_core_import_still_runs_requested_network_checks(
     monkeypatch.setattr(preflight, "_network_checks", network)
     assert preflight.run(network="local") == 1
     network.assert_called_once_with("local")
-    assert "[OK]     web3 importable" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "[MISSING] eth-account not importable" in output
+    assert output.count("[MISSING]") == 1
+    assert "[OK]     web3 importable" in output
+    assert "SENTINEL_IMPORT_SECRET" not in output
