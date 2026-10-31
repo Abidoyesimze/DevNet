@@ -86,15 +86,11 @@ Submit your model to the registry. Requires the registration fee (see [Protocol 
 dincli task model-owner register-request \
   --taskCoordinator <coordinator_address> \
   --taskAuditor <auditor_address> \
-  [--manifestpath <path_to_manifest.json>] \
+  [--manifestpath <path_to_manifest.json> | --manifestCID <manifest_cid>] \
   [--isOpenSource]
 ```
 
-> [!WARNING]
-> Use `--manifestpath`, not `--manifestCID`. Passing `--manifestCID` directly
-> to `register-request` currently crashes with an `UnboundLocalError` before
-> any transaction is sent — see
-> [issue #295](https://github.com/InfiniteZeroFoundation/DevNet/issues/295).
+`--manifestCID` skips the IPFS upload and registers an already-pinned manifest directly.
 
 On success you receive a **`requestId`**. Track it to monitor approval status.
 
